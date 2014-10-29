@@ -23,7 +23,7 @@ Create a loader. There's two loaders, one for Street View panoramas and the othe
 
 ```javascript
 var loader = new PANOMNOM.GoogleStreetViewLoader();
-var loader = new PANOMNOM.GoogleStreetViewLoader();
+var loader = new PANOMNOM.GooglePhotoSphereLoader();
 ```
 
 Attach onLoad event listener (there's also progress and error):
@@ -49,7 +49,7 @@ loader.loadFromURL( panoURL, 2 );
 
 **Note: loader.loadFromLocation is only available for PANOMNOM.GoogleStreetViewLoader**
 
-Please see the exampls folder for proper implementations of each case.
+Please see the examples folder for proper implementations of each case.
 
 #License
 
