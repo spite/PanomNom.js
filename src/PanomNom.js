@@ -297,7 +297,7 @@ PANOMNOM.GoogleStreetViewLoader.prototype.load = function( id, zoom ) {
 	var w = this.levelsW[ zoom ];
 	var h = this.levelsH[ zoom ];
 
-	url = "http://maps.google.com/cbk?output=json&cb_client=maps_sv&v=4&dm=1&pm=1&ph=1&hl=en&panoid=" + id;
+	/*url = "http://maps.google.com/cbk?output=json&cb_client=maps_sv&v=4&dm=1&pm=1&ph=1&hl=en&panoid=" + id;
 	var http_request = new XMLHttpRequest();
 	http_request.open( 'GET', url, true );
 	http_request.onreadystatechange = function () {
@@ -306,8 +306,7 @@ PANOMNOM.GoogleStreetViewLoader.prototype.load = function( id, zoom ) {
 			this.metadata = data;
 		}
 	}.bind( this );
-	http_request.send(null);
-
+	http_request.send(null);*/
 
 	this.service.getPanoramaById( id, function( result, status) {
 
@@ -315,7 +314,8 @@ PANOMNOM.GoogleStreetViewLoader.prototype.load = function( id, zoom ) {
 			this.error( 'Can\'t load panorama information' );
 			return;
 		}
-
+		
+		this.metadata = result;
 		this.dispatchEvent( { type: 'data', message: result } );
 
 		//console.log( result );
