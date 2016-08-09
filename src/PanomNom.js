@@ -77,7 +77,7 @@ EventDispatcher.prototype = {
 	},
 
 	dispatchEvent: function ( event ) {
-			
+
 		if ( this._listeners === undefined ) return;
 
 		var listeners = this._listeners;
@@ -206,10 +206,10 @@ PANOMNOM.Stitcher.prototype.processQueue = function() {
 
 	var img = new Image();
 	img.addEventListener( 'load', function() {
-		
+
 		this.loaded++;
 
-		this.ctx.drawImage( img, task.x, task.y );
+		this.ctx.drawImage( img, 0, 0, img.naturalWidth, img.naturalHeight, task.x, task.y, 512, 512 );
 		this.processQueue();
 
 		img = null;
@@ -217,7 +217,7 @@ PANOMNOM.Stitcher.prototype.processQueue = function() {
 	}.bind( this ) );
 
 	img.addEventListener( 'error', function() {
-		
+
 		this.dispatchEvent( { type: 'error', message: 'images missing' } );
 		this.processQueue();
 
@@ -291,36 +291,13 @@ PANOMNOM.GoogleStreetViewLoader.prototype.load = function( id, zoom ) {
 	}
 
 	this.zoom = zoom;
+	this.panoId = id;
+
 	this.canvas.width = this.widths[ zoom ];
 	this.canvas.height = this.heights[ zoom ];
 
 	var w = this.levelsW[ zoom ];
 	var h = this.levelsH[ zoom ];
-
-	/*url = "http://maps.google.com/cbk?output=json&cb_client=maps_sv&v=4&dm=1&pm=1&ph=1&hl=en&panoid=" + id;
-	var http_request = new XMLHttpRequest();
-	http_request.open( 'GET', url, true );
-	http_request.onreadystatechange = function () {
-		if ( http_request.readyState == 4 && http_request.status == 200 ) {
-			var data = JSON.parse( http_request.responseText );
-			this.metadata = data;
-		}
-	}.bind( this );
-	http_request.send(null);*/
-
-	this.service.getPanoramaById( id, function( result, status) {
-
-		if( result === null ) {
-			this.error( 'Can\'t load panorama information' );
-			return;
-		}
-		
-		this.metadata = result;
-		this.dispatchEvent( { type: 'data', message: result } );
-
-		//console.log( result );
-
-	}.bind( this ) );
 
 	for( var y = 0; y < h; y++ ) {
 		for( var x = 0; x < w; x++ ) {
@@ -338,13 +315,48 @@ PANOMNOM.GoogleStreetViewLoader.prototype.load = function( id, zoom ) {
 		}
 	}
 
-	this.stitcher.processQueue();
+	url = "http://maps.google.com/cbk?output=json&hl=x-local&cb_client=maps_sv&v=4&dm=1&pm=1&ph=1&hl=en&panoid=" + id
 
+	/*var http_request = new XMLHttpRequest();
+	http_request.open( 'GET', url, true );
+	http_request.onreadystatechange = function () {
+		if ( http_request.readyState == 4 && http_request.status == 200 ) {
+			var data = JSON.parse( http_request.responseText );
+			this.metadata = data;
+		}
+	}.bind( this );
+	http_request.send(null);*/
+
+	/*var l = this;
+	$.ajax( {
+                url: url,
+                dataType: 'jsonp'
+            } ) .done(function(data, textStatus, xhr) {
+                var decoded, depthMap;
+
+                l.extractDepthData( data.model.depth_map );
+
+            }); */
+
+	this.service.getPanoramaById( id, function( result, status) {
+
+		if( result === null ) {
+			this.error( 'Can\'t load panorama information' );
+			return;
+		}
+
+		this.metadata = result;
+		this.dispatchEvent( { type: 'data', message: result } );
+
+		this.stitcher.processQueue();
+		//console.log( result );
+
+	}.bind( this ) );
 }
 
 PANOMNOM.GoogleStreetViewLoader.prototype.loadFromLocation = function( location, zoom ) {
 
-	this.getIdByLocation( 
+	this.getIdByLocation(
 		location,
 		function( id ) {
 			this.load( id, zoom );
@@ -398,7 +410,7 @@ PANOMNOM.GoogleStreetViewLoader.prototype.getIdByLocation = function( location, 
 	return;*/
 
 	var url = 'https://cbks0.google.com/cbk?cb_client=maps_sv.tactile&authuser=0&hl=en&output=polygon&it=1%3A1&rank=closest&ll=' + location.lat() + ',' + location.lng() + '&radius=50';
-	
+
 	var http_request = new XMLHttpRequest();
 	http_request.open( 'GET', url, true );
 	http_request.onreadystatechange = function () {
@@ -413,6 +425,30 @@ PANOMNOM.GoogleStreetViewLoader.prototype.getIdByLocation = function( location, 
 		}
 	}.bind( this );
 	http_request.send(null);
+
+}
+
+var Base64={_keyStr:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=",encode:function(e){var t="";var n,r,i,s,o,u,a;var f=0;e=Base64._utf8_encode(e);while(f<e.length){n=e.charCodeAt(f++);r=e.charCodeAt(f++);i=e.charCodeAt(f++);s=n>>2;o=(n&3)<<4|r>>4;u=(r&15)<<2|i>>6;a=i&63;if(isNaN(r)){u=a=64}else if(isNaN(i)){a=64}t=t+this._keyStr.charAt(s)+this._keyStr.charAt(o)+this._keyStr.charAt(u)+this._keyStr.charAt(a)}return t},decode:function(e){var t="";var n,r,i;var s,o,u,a;var f=0;e=e.replace(/[^A-Za-z0-9\+\/\=]/g,"");while(f<e.length){s=this._keyStr.indexOf(e.charAt(f++));o=this._keyStr.indexOf(e.charAt(f++));u=this._keyStr.indexOf(e.charAt(f++));a=this._keyStr.indexOf(e.charAt(f++));n=s<<2|o>>4;r=(o&15)<<4|u>>2;i=(u&3)<<6|a;t=t+String.fromCharCode(n);if(u!=64){t=t+String.fromCharCode(r)}if(a!=64){t=t+String.fromCharCode(i)}}t=Base64._utf8_decode(t);return t},_utf8_encode:function(e){e=e.replace(/\r\n/g,"\n");var t="";for(var n=0;n<e.length;n++){var r=e.charCodeAt(n);if(r<128){t+=String.fromCharCode(r)}else if(r>127&&r<2048){t+=String.fromCharCode(r>>6|192);t+=String.fromCharCode(r&63|128)}else{t+=String.fromCharCode(r>>12|224);t+=String.fromCharCode(r>>6&63|128);t+=String.fromCharCode(r&63|128)}}return t},_utf8_decode:function(e){var t="";var n=0;var r=c1=c2=0;while(n<e.length){r=e.charCodeAt(n);if(r<128){t+=String.fromCharCode(r);n++}else if(r>191&&r<224){c2=e.charCodeAt(n+1);t+=String.fromCharCode((r&31)<<6|c2&63);n+=2}else{c2=e.charCodeAt(n+1);c3=e.charCodeAt(n+2);t+=String.fromCharCode((r&15)<<12|(c2&63)<<6|c3&63);n+=3}}return t}}
+
+PANOMNOM.GoogleStreetViewLoader.prototype.extractDepthData = function( map ) {
+
+	var rawDepthMap = map;
+
+	while(rawDepthMap.length %4 != 0)
+		rawDepthMap += '=';
+
+	// Replace '-' by '+' and '_' by '/'
+	rawDepthMap = rawDepthMap.replace(/-/g,'+');
+	rawDepthMap = rawDepthMap.replace(/_/g,'/');
+
+	document.body.textContent = rawDepthMap;
+
+	var decompressed = zpipe.inflate( $.base64.decode( rawDepthMap ) );
+
+	var depthMap = new Uint8Array(decompressed.length);
+	for(i=0; i<decompressed.length; ++i)
+		depthMap[i] = decompressed.charCodeAt(i);
+	console.log( depthMap );
 
 }
 
@@ -443,7 +479,8 @@ PANOMNOM.GooglePhotoSphereLoader.prototype.load = function( id, zoom ) {
 	//console.log( 'Loading ' + id + ' ' + zoom );
 
 	this.zoom = zoom;
-	
+	this.panoId = id;
+
 	this.service.getPanoramaById( id, function( result, status) {
 
 		if( result === null ) {
