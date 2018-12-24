@@ -110,7 +110,7 @@
 
   var PANOMNOM = {}
 
-  PANOMNOM.GOOGLEMAPSAPI = 'http://maps.google.com/maps/api/js?sensor=false';
+  PANOMNOM.GOOGLEMAPSAPI = '//maps.google.com/maps/api/js?sensor=false';
 
   PANOMNOM.GoogleStreetViewService = null;
   PANOMNOM.GoogleGeoCoder = null;
