@@ -320,9 +320,11 @@
       var level = 0;
       
       do{
-        w /= Math.pow(2,level);
+        if(level){
+          w /= 2;
+          h /= 2;
+        }
         this.widths.unshift(w);
-        h /= Math.pow(2,level);
         this.heights.unshift(h);
         this.tilesW.unshift(Math.ceil(w/this.metadata.tiles.tileSize.width));
         this.tilesH.unshift(Math.ceil(h/this.metadata.tiles.tileSize.height));
