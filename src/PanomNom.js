@@ -288,54 +288,11 @@
       console.warn('No zoom provided, assuming 1');
       zoom = 1;
     }
-
+    
     this.zoom = zoom;
     this.panoId = id;
-
-    this.canvas.width = this.widths[zoom];
-    this.canvas.height = this.heights[zoom];
-
-    var w = this.levelsW[zoom];
-    var h = this.levelsH[zoom];
-
-    for (var y = 0; y < h; y++) {
-      for (var x = 0; x < w; x++) {
-
-        var url = 'https://geo0.ggpht.com/cbk?cb_client=maps_sv.tactile&authuser=0&hl=en&panoid=' + id + '&output=tile&x=' + x + '&y=' + y + '&zoom=' + zoom + '&nbt&fover=2';
-        //var url = 'https://cbks2.google.com/cbk?cb_client=maps_sv.tactile&authuser=0&hl=en&panoid=' + id + '&output=tile&zoom=' + zoom + '&x=' + x + '&y=' + y + '&' + Date.now();
-
-        this.stitcher.addTileTask({
-
-          url: url,
-          x: x * 512,
-          y: y * 512,
-
-        });
-      }
-    }
-
-    url = "http://maps.google.com/cbk?output=json&hl=x-local&cb_client=maps_sv&v=4&dm=1&pm=1&ph=1&hl=en&panoid=" + id
-
-    /*var http_request = new XMLHttpRequest();
-    http_request.open( 'GET', url, true );
-    http_request.onreadystatechange = function () {
-      if ( http_request.readyState == 4 && http_request.status == 200 ) {
-        var data = JSON.parse( http_request.responseText );
-        this.metadata = data;
-      }
-    }.bind( this );
-    http_request.send(null);*/
-
-    /*var l = this;
-  $.ajax( {
-                url: url,
-                dataType: 'jsonp'
-            } ) .done(function(data, textStatus, xhr) {
-                var decoded, depthMap;
-
-                l.extractDepthData( data.model.depth_map );
-
-            }); */
+    
+    //url = "http://maps.google.com/cbk?output=json&hl=x-local&cb_client=maps_sv&v=4&dm=1&pm=1&ph=1&hl=en&panoid=" + id
 
     this.service.getPanoramaById(id, function(result, status) {
 
@@ -345,6 +302,52 @@
       }
 
       this.metadata = result;
+      
+      
+      /*
+      tiles.worldSize.width = 13312
+      tiles.worldSize.height = 6656
+      tiles.tileSize.width = 512
+      tiles.tileSize.height = 512
+      */
+      
+      var w = this.metadata.tiles.worldSize.width;
+      var h = this.metadata.tiles.worldSize.height;
+      this.tilesW = [];
+      this.tilesH = [];
+      this.widths = [];
+      this.heights = [];
+      var level = 0;
+      
+      do{
+        w /= Math.pow(2,level);
+        this.widths.unshift(w);
+        h /= Math.pow(2,level);
+        this.heights.unshift(h);
+        this.tilesW.unshift(Math.ceil(w/this.metadata.tiles.tileSize.width));
+        this.tilesH.unshift(Math.ceil(h/this.metadata.tiles.tileSize.height));
+        level++;
+      }while(this.tilesW[0] > 1);
+
+      this.canvas.width = this.widths[this.zoom];
+      this.canvas.height = this.heights[this.zoom];
+
+
+      for (var y = 0; y < this.tilesH[zoom]; y++) {
+        for (var x = 0; x < this.tilesW[zoom]; x++) {
+
+          var url = 'https://geo0.ggpht.com/cbk?cb_client=maps_sv.tactile&authuser=0&hl=en&panoid=' + id + '&output=tile&x=' + x + '&y=' + y + '&zoom=' + this.zoom + '&nbt&fover=2';
+          //var url = 'https://cbks2.google.com/cbk?cb_client=maps_sv.tactile&authuser=0&hl=en&panoid=' + id + '&output=tile&zoom=' + zoom + '&x=' + x + '&y=' + y + '&' + Date.now();
+
+          this.stitcher.addTileTask({
+            url: url,
+            x: x * this.metadata.tiles.tileSize.width,
+            y: y * this.metadata.tiles.tileSize.height
+          });
+        }
+      }
+      
+      
       this.dispatchEvent({ type: 'data', message: result });
 
       this.stitcher.processQueue();
