@@ -1,3 +1,6 @@
-#!/bin/sh
+#!/bin/bash
 
-uglifyjs ../src/PanomNom.js -m -c sequences -c dead_code -c conditionals -c booleans -c unused -c if_return -c join_vars -c drop_console > ../build/PanomNom.min.js
+esbuild ../src/PanomNom.js --bundle --format=iife --outfile=../build/PanomNom.js
+esbuild ../src/PanomNom.js --bundle --minify --format=iife --outfile=../build/PanomNom.min.js
+esbuild ../src/PanomNom.js --bundle --format=esm --outfile=../build/PanomNom.module.js
+esbuild ../src/PanomNom.js --bundle --minify --format=esm --outfile=../build/PanomNom.module.min.js
