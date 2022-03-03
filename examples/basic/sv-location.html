@@ -57,18 +57,23 @@
   <body>
     <section>
       <h1>PanomNom.js Basic Usage</h1>
-      <h2>PANOMNOM.GoogleStreetViewLoader.loadFromLocation</h2>
+      <h2>GoogleStreetViewLoader.load + getIdByLocation</h2>
       <p>
-        This example shows how to set PANOMNOM.GoogleStreetViewLoader to load
-        based on location.
+        This example shows how to set GoogleStreetViewLoader + getIdByLocation
+        to load based on location.
       </p>
       <div id="progressDiv"></div>
       <div id="messageDiv"></div>
       <div id="errorDiv"></div>
       <div id="canvasContainer"></div>
     </section>
+    <script src="https://maps.google.com/maps/api/js"></script>
+    <script type="module">
+      import {
+        GoogleStreetViewLoader,
+        getIdByLocation,
+      } from "../../src/PanomNom.js";
 
-    <script>
       var l;
 
       var messageDiv = document.getElementById("messageDiv");
@@ -88,57 +93,53 @@
         progressDiv.innerHTML = message;
       }
 
-      window.addEventListener("load", function () {
+      const locations = [
+        { lat: 51.50700703827454, lng: -0.12791916931155356 },
+        { lat: 32.6144404, lng: -108.9852017 },
+        { lat: 39.36382677360614, lng: 8.431220278759724 },
+        { lat: 59.30571937680209, lng: 4.879402148657164 },
+        { lat: 28.240385123352873, lng: -16.629988706884774 },
+        { lat: 50.09072314148827, lng: 14.393133454556278 },
+        { lat: 41.413416092316275, lng: 2.1531126527786455 },
+        { lat: 35.69143938066447, lng: 139.695139627539 },
+        { lat: 35.67120372775569, lng: 139.77167914398797 },
+        { lat: 54.552083679428065, lng: -3.297380963134742 },
+      ];
+
+      async function load() {
         showProgress("Starting.");
 
-        l = new PANOMNOM.GoogleStreetViewLoader();
-
-        l.addEventListener("load", function () {
-          showProgress("Finished.");
-          showError("");
-          canvasContainer.appendChild(this.canvas);
-          showMessage(
-            "Panorama loaded, street view data " +
-              this.metadata.Data.copyright +
-              ".<br/>"
-          );
+        const loader = new GoogleStreetViewLoader();
+        loader.onProgress((p) => {
+          showProgress("Loaded " + p.toFixed(0) + "%");
         });
 
-        l.addEventListener("error", function (e) {
-          showError(e.message);
-        });
-
-        l.addEventListener("progress", function (e) {
-          showProgress("Loaded " + e.message.toFixed(0) + "%");
-        });
-
-        var locations = [
-          { lat: 51.50700703827454, lng: -0.12791916931155356 },
-          { lat: 32.6144404, lng: -108.9852017 },
-          { lat: 39.36382677360614, lng: 8.431220278759724 },
-          { lat: 59.30571937680209, lng: 4.879402148657164 },
-          { lat: 28.240385123352873, lng: -16.629988706884774 },
-          { lat: 50.09072314148827, lng: 14.393133454556278 },
-          { lat: 41.413416092316275, lng: 2.1531126527786455 },
-          { lat: 35.69143938066447, lng: 139.695139627539 },
-          { lat: 35.67120372775569, lng: 139.77167914398797 },
-          { lat: 54.552083679428065, lng: -3.297380963134742 },
-        ];
-
-        var pos;
+        let pos;
         if (window.location.hash) {
           parts = window.location.hash.substr(1).split(",");
           pos = { lat: parts[0], lng: parts[1] };
         } else {
           pos = locations[Math.floor(Math.random() * locations.length)];
         }
-        var myLatlng = new google.maps.LatLng(pos.lat, pos.lng);
 
-        showProgress("Loading " + pos.lat + ", " + pos.lng);
-        l.loadFromLocation(myLatlng, 3);
-      });
+        try {
+          const data = await getIdByLocation(pos.lat, pos.lng);
+          showProgress("Loading " + pos.lat + ", " + pos.lng);
+          await loader.load(data.data.location.pano, 3);
+          showProgress("Finished.");
+          showError("");
+          canvasContainer.appendChild(loader.canvas);
+          showMessage(
+            "Panorama loaded, street view data " +
+              data.data.copyright +
+              ".<br/>"
+          );
+        } catch (e) {
+          showError(e.message);
+        }
+      }
+
+      load();
     </script>
-    <script src="//maps.google.com/maps/api/js?sensor=false"></script>
-    <script src="../../src/PanomNom.js"></script>
   </body>
 </html>

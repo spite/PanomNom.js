@@ -75,10 +75,10 @@
         This example shows how to set PANOMNOM.GoogleStreetViewLoader to load
         from a google maps URL.
       </p>
-      <p>
+      <p style="overflow: auto">
         <i
           >Try
-          https://www.google.es/maps/@48.8538259,2.3122109,3a,75y,12.11h,90.51t/data=!3m4!1e1!3m2!1s3x93C36a0N-rkVxqySNwKQ!2e0?hl=en</i
+          https://www.google.com/maps/@51.546483,-0.1293555,29051a,13.1y/data=!3m5!1e1!3m3!1sKGh2_8m7l_ikrgaYrAAFeA!2e0!6shttps:%2F%2Fstreetviewpixels-pa.googleapis.com%2Fv1%2Fthumbnail%3Fpanoid%3DKGh2_8m7l_ikrgaYrAAFeA%26cb_client%3Dsearch.revgeo_and_fetch.gps%26w%3D96%26h%3D64%26yaw%3D45.903923%26pitch%3D0%26thumbfov%3D100</i
         >
       </p>
       <form id="URLForm">
@@ -90,9 +90,12 @@
       <div id="errorDiv"></div>
       <div id="canvasContainer"></div>
     </section>
-
-    <script>
-      var l;
+    <script src="https://maps.google.com/maps/api/js"></script>
+    <script type="module">
+      import {
+        GoogleStreetViewLoader,
+        getIdFromURL,
+      } from "../../src/PanomNom.js";
 
       var messageDiv = document.getElementById("messageDiv");
       var errorDiv = document.getElementById("errorDiv");
@@ -113,38 +116,43 @@
         progressDiv.innerHTML = message;
       }
 
-      window.addEventListener("load", function () {
-        showProgress("Starting.");
+      async function load(url) {
+        showMessage("");
+        try {
+          const id = getIdFromURL(url);
+          showProgress(`Loading ${id}`);
+          await loader.load(id, 3);
 
-        l = new PANOMNOM.GoogleStreetViewLoader();
-
-        l.addEventListener("load", function () {
           showProgress("Finished.");
           showError("");
-          canvasContainer.appendChild(this.canvas);
+          canvasContainer.appendChild(loader.canvas);
           showMessage(
             "Panorama loaded, street view data " +
-              this.metadata.Data.copyright +
+              loader.metadata.copyright +
               ".<br/>"
           );
-        });
+        } catch (e) {
+          debugger;
+          if (e === "ZERO_RESULTS") {
+            showError("No results");
+          } else {
+            showError(e.message);
+          }
+        }
+      }
 
-        l.addEventListener("error", function (e) {
-          showError(e.message);
-        });
+      showProgress("Starting.");
 
-        l.addEventListener("progress", function (e) {
-          showProgress("Loaded " + e.message.toFixed(0) + "%");
-        });
+      const loader = new GoogleStreetViewLoader();
 
-        URLForm.addEventListener("submit", function (e) {
-          showProgress("Loading " + URLInput.value);
-          l.loadFromURL(URLInput.value, 3);
-          e.preventDefault();
-        });
+      loader.onProgress((p) => {
+        showProgress("Loaded " + p.toFixed(0) + "%");
+      });
+
+      URLForm.addEventListener("submit", (e) => {
+        load(URLInput.value);
+        e.preventDefault();
       });
     </script>
-    <script src="//maps.google.com/maps/api/js?sensor=false"></script>
-    <script src="../../src/PanomNom.js"></script>
   </body>
 </html>
