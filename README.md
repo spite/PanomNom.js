@@ -38,7 +38,7 @@ await loader.load(panoId, 3);
 /* Load from location: google.maps.LatLng, zoom default 1 */
 import { getIdByLocation } from "./PanonomNom.module.js";
 const data = await getIdByLocation(pos.lat, pos.lng);
-await loader.load(data.data.location.pano, 3);
+await loader.load(data.data.location.pano);
 
 /* Load from URL: URL from maps.google.com, zoom 2 */
 import { getIdFromURL } from "./PanonomNom.module.js";
