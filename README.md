@@ -1,60 +1,51 @@
-PanomNom.js
-======================
+# PanomNom.js
 
 Panorama fetching tools for JavaScript
 
 Current supported sources
+
 - Google Street View panoramas
 - Google PhotoSpheres
 
-Upcoming sources
-- Yandex Street View
-- Bing StreetSide
+### How to use
 
-###How to use 
-
-Include the library.
+Include the library or the module. You can import the functions separatedly from the /src folder, or from the PanomNom.module file.
 
 ```javascript
-<script src="PanomNom.min.js"></script>
+import { GoogleStreetViewLoader } from "./PanomNom.module.js";
 ```
 
 Create a loader. There's two loaders, one for Street View panoramas and the other for PhotoSpheres:
 
 ```javascript
-var loader = new PANOMNOM.GoogleStreetViewLoader();
-var loader = new PANOMNOM.GooglePhotoSphereLoader();
+const loader = new GoogleStreetViewLoader();
+const loader = new GooglePhotoSphereLoader();
 ```
-
-Attach onLoad event listener (there's also progress and error):
-
-```javascript
-loader.addEventListener( 'load', function() {
-    // Do whatever with this.canvas
-} );
-````
-
-Start loading the panorama. There's several methods:
 
 ```javascript
 /* Load from ID: pano id, zoom 3 */
-loader.load( panoId, 3 );
+await loader.load(panoId, 3);
 
 /* Load from location: google.maps.LatLng, zoom default 1 */
-loader.loadFromLocation( panoLatLng ); 
+import { getIdByLocation } from "./PanonomNom.module.js";
+const data = await getIdByLocation(pos.lat, pos.lng);
+await loader.load(data.data.location.pano, 3);
 
 /* Load from URL: URL from maps.google.com, zoom 2 */
-loader.loadFromURL( panoURL, 2 );
+const id = getIdFromURL(url);
+await loader.load(id, 2);
 ```
 
-**Note: loader.loadFromLocation is only available for PANOMNOM.GoogleStreetViewLoader**
+Once the panorama is loaded, `loader.canvas` has the resulting stitched image.
+
+**Note: getIdByLocation will only return ids valid for Street View panoramas**
 
 Please see the examples folder for proper implementations of each case.
 
-#License
+# License
 
 MIT licensed
 
-Copyright (C) 2014 Jaume Sanchez Elias http://twitter.com/thespite
+Copyright (C) 2022 Jaume Sanchez Elias http://twitter.com/thespite
 
 http://www.clicktorelease.com
