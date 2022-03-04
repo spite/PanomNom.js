@@ -52,9 +52,9 @@ Once the panorama is loaded, `loader.canvas` has the resulting stitched image.
 
 You can use `loader.onProgress` to track loading progress:
 
-````javascript
+```javascript
 loader.onProgress((p) => {
-    console.log(`Loaded ${p.toFixed(0)}%`);
+  console.log(`Loaded ${p.toFixed(0)}%`);
 });
 ```
 
@@ -73,4 +73,7 @@ MIT licensed
 Copyright (C) 2022 Jaume Sanchez Elias http://twitter.com/thespite
 
 http://www.clicktorelease.com
-````
+
+```
+
+```
