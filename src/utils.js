@@ -95,32 +95,6 @@ function getIdFromURL(url) {
   }
 }
 
-import { base64 } from "./base64.js";
-function extractDepthData(metadata) {
-  const map = metadata.model.depth_map;
-  var rawDepthMap = map;
-
-  while (rawDepthMap.length % 4 != 0) rawDepthMap += "=";
-
-  // Replace '-' by '+' and '_' by '/'
-  rawDepthMap = rawDepthMap.replace(/-/g, "+");
-  rawDepthMap = rawDepthMap.replace(/_/g, "/");
-
-  document.body.textContent = rawDepthMap;
-
-  var decompressed = zpipe.inflate(base64.decode(rawDepthMap));
-  // var decompressed = zpipe.inflate(atob(rawDepthMap));
-
-  var depthMap = new Uint8Array(decompressed.length);
-  for (let i = 0; i < decompressed.length; ++i) {
-    depthMap[i] = decompressed.charCodeAt(i);
-  }
-
-  const canvas = document.createElement('canvas');
-  
-  console.log(depthMap);
-}
-
 async function getExtraMetadata(id) {
   const url = `http://maps.google.com/cbk?output=json&hl=x-local&cb_client=maps_sv&v=4&dm=1&pm=1&ph=1&hl=en&panoid=${id}`;
   const res = await fetch(url);
