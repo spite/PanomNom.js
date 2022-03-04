@@ -31,6 +31,8 @@ Create a loader:
 const loader = new GoogleStreetViewLoader();
 ```
 
+Then `loader.load` takes an id and a zoom level (1-5, default 1). There are a few helper methods to retrieve panoIds.
+
 ```javascript
 /* Load from ID: pano id, zoom 3 */
 await loader.load(panoId, 3);
