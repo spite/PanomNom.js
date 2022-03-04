@@ -140,11 +140,7 @@ var GoogleStreetViewLoader = class extends Loader {
     this.zoom = 1;
     this.metadata = {};
   }
-  async load(id, zoom) {
-    if (zoom === void 0) {
-      console.warn("No zoom provided, assuming 1");
-      zoom = 1;
-    }
+  async load(id, zoom = 1) {
     this.zoom = zoom;
     this.panoId = id;
     const metadata = await getPanoramaById(id);
