@@ -111,5 +111,4 @@ export {
   getIdByLocation,
   getIdFromURL,
   getExtraMetadata,
-  extractDepthData,
 };
