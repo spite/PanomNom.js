@@ -132,6 +132,8 @@
         } catch (e) {
           if (e === "ZERO_RESULTS") {
             showError("No results");
+          } else if (e === "NO_IMAGE") {
+            showError("Could not load image.");
           } else {
             showError(e.message);
           }
