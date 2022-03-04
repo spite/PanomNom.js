@@ -10,12 +10,7 @@ class GoogleStreetViewLoader extends Loader {
     this.metadata = {};
   }
 
-  async load(id, zoom) {
-    if (zoom === undefined) {
-      console.warn("No zoom provided, assuming 1");
-      zoom = 1;
-    }
-
+  async load(id, zoom = 1) {
     this.zoom = zoom;
     this.panoId = id;
 
