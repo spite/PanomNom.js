@@ -9,6 +9,12 @@ Current supported sources
 
 ### How to use
 
+Include the google maps API for the services to resolve metadata.
+
+```javascript
+<script src="https://maps.google.com/maps/api/js"></script>
+```
+
 Include the library or the module. You can import the functions separatedly from the /src folder, or from the PanomNom.module file.
 
 ```javascript
