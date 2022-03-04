@@ -17,15 +17,18 @@ Include the google maps API for the services to resolve metadata.
 
 Include the library or the module. You can import the functions separatedly from the /src folder, or from the PanomNom.module file.
 
+There are two loaders, one for Street View panoramas and another for PhotoSpheres.
+
+# GoogleStreetViewLoader
+
 ```javascript
 import { GoogleStreetViewLoader } from "./PanomNom.module.js";
 ```
 
-Create a loader. There's two loaders, one for Street View panoramas and the other for PhotoSpheres:
+Create a loader:
 
 ```javascript
 const loader = new GoogleStreetViewLoader();
-const loader = new GooglePhotoSphereLoader();
 ```
 
 ```javascript
@@ -47,10 +50,20 @@ Once the panorama is loaded, `loader.canvas` has the resulting stitched image.
 
 **Note: getIdByLocation will only return ids valid for Street View panoramas**
 
+You can use `loader.onProgress` to track loading progress:
+
+````javascript
+loader.onProgress((p) => {
+    console.log(`Loaded ${p.toFixed(0)}%`);
+});
+```
+
+# Examples
+
 Please see the examples folder for proper implementations of each case.
 
-[Street View panorama from id](https://spite.github.io/PanomNom.js/examples/basic/sv-panoid.html)  
-[Street View panorama from lat,lng](https://spite.github.io/PanomNom.js/examples/basic/sv-location.html)  
+[Street View panorama from id](https://spite.github.io/PanomNom.js/examples/basic/sv-panoid.html)
+[Street View panorama from lat,lng](https://spite.github.io/PanomNom.js/examples/basic/sv-location.html)
 [Street View panorama from URL](https://spite.github.io/PanomNom.js/examples/basic/sv-url.html)
 
 # License
@@ -60,3 +73,4 @@ MIT licensed
 Copyright (C) 2022 Jaume Sanchez Elias http://twitter.com/thespite
 
 http://www.clicktorelease.com
+````
