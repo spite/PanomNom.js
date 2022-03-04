@@ -15,7 +15,7 @@ Include the google maps API for the services to resolve metadata.
 <script src="https://maps.google.com/maps/api/js"></script>
 ```
 
-Include the library or the module. You can import the functions separatedly from the /src folder, or from the PanomNom.module file.
+Include the library or the module. You can import the functions separatedly from the `/src` folder, or from the `PanomNom.module` file.
 
 There are two loaders, one for Street View panoramas and another for PhotoSpheres.
 
@@ -73,7 +73,3 @@ MIT licensed
 Copyright (C) 2022 Jaume Sanchez Elias http://twitter.com/thespite
 
 http://www.clicktorelease.com
-
-```
-
-```
