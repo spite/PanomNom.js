@@ -63,6 +63,10 @@ loader.onProgress((p) => {
 });
 ```
 
+# Copyright
+
+Very important: `loader.metadata.copyright` should contain the copyright notice for the retrieves images. You should display it somewhere in your page.
+
 # Examples
 
 Please see the examples folder for proper implementations of each case.
