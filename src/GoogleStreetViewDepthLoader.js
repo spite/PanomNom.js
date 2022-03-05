@@ -12,7 +12,7 @@ class GoogleStreetViewDepthLoader {
     const json = JSON.parse(text.substr(4));
     const dm = json[1][0][5][0][5][1][2];
 
-    var decoded, depthMap;
+    let decoded, depthMap;
     try {
       decoded = self.decode(dm);
       depthMap = self.parse(decoded);
@@ -20,16 +20,11 @@ class GoogleStreetViewDepthLoader {
       depthMap = self.createEmptyDepthMap();
       throw new Error(e);
     }
+    this.depthMap = depthMap;
     return depthMap;
   }
 
   decode(rawDepthMap) {
-    var self = this,
-      i,
-      compressedDepthMapData,
-      depthMap,
-      decompressedDepthMap;
-
     // Append '=' in order to make the length of the array a multiple of 4
     while (rawDepthMap.length % 4 != 0) rawDepthMap += "=";
 
@@ -38,11 +33,11 @@ class GoogleStreetViewDepthLoader {
     rawDepthMap = rawDepthMap.replace(/_/g, "/");
 
     // Decode and decompress data
-    decompressedDepthMap = atob(rawDepthMap);
+    const decompressedDepthMap = atob(rawDepthMap);
 
     // Convert output of decompressor to Uint8Array
-    depthMap = new Uint8Array(decompressedDepthMap.length);
-    for (i = 0; i < decompressedDepthMap.length; ++i)
+    const depthMap = new Uint8Array(decompressedDepthMap.length);
+    for (let i = 0; i < decompressedDepthMap.length; ++i)
       depthMap[i] = decompressedDepthMap.charCodeAt(i);
     return depthMap;
   }
@@ -58,76 +53,65 @@ class GoogleStreetViewDepthLoader {
   }
 
   parsePlanes(header, depthMap) {
-    var planes = [],
-      indices = [],
-      i,
-      n = [0, 0, 0],
-      d,
-      byteOffset;
+    const planes = [];
+    const indices = [];
 
-    for (i = 0; i < header.width * header.height; ++i) {
+    for (let i = 0; i < header.width * header.height; ++i) {
       indices.push(depthMap.getUint8(header.offset + i));
     }
 
-    for (i = 0; i < header.numberOfPlanes; ++i) {
-      byteOffset = header.offset + header.width * header.height + i * 4 * 4;
+    const n = [0, 0, 0];
+    for (let i = 0; i < header.numberOfPlanes; ++i) {
+      const byteOffset =
+        header.offset + header.width * header.height + i * 4 * 4;
       n[0] = depthMap.getFloat32(byteOffset, true);
       n[1] = depthMap.getFloat32(byteOffset + 4, true);
       n[2] = depthMap.getFloat32(byteOffset + 8, true);
-      d = depthMap.getFloat32(byteOffset + 12, true);
+      const d = depthMap.getFloat32(byteOffset + 12, true);
       planes.push({
         n: n.slice(0),
         d: d,
       });
     }
 
-    return { planes: planes, indices: indices };
+    return { planes, indices };
   }
 
   computeDepthMap(header, indices, planes) {
-    var depthMap = null,
-      x,
-      y,
-      planeIdx,
-      phi,
-      theta,
-      v = [0, 0, 0],
-      w = header.width,
-      h = header.height,
-      plane,
-      t,
-      p;
+    const v = [0, 0, 0];
+    const w = header.width;
+    const h = header.height;
 
-    depthMap = new Float32Array(w * h);
+    const depthMap = new Float32Array(w * h);
 
-    var sin_theta = new Float32Array(h);
-    var cos_theta = new Float32Array(h);
-    var sin_phi = new Float32Array(w);
-    var cos_phi = new Float32Array(w);
+    const sin_theta = new Float32Array(h);
+    const cos_theta = new Float32Array(h);
+    const sin_phi = new Float32Array(w);
+    const cos_phi = new Float32Array(w);
 
-    for (y = 0; y < h; ++y) {
-      theta = ((h - y - 0.5) / h) * Math.PI;
+    for (let y = 0; y < h; ++y) {
+      const theta = ((h - y - 0.5) / h) * Math.PI;
       sin_theta[y] = Math.sin(theta);
       cos_theta[y] = Math.cos(theta);
     }
-    for (x = 0; x < w; ++x) {
-      phi = ((w - x - 0.5) / w) * 2 * Math.PI + Math.PI / 2;
+    for (let x = 0; x < w; ++x) {
+      const phi = ((w - x - 0.5) / w) * 2 * Math.PI + Math.PI / 2;
       sin_phi[x] = Math.sin(phi);
       cos_phi[x] = Math.cos(phi);
     }
 
-    for (y = 0; y < h; ++y) {
-      for (x = 0; x < w; ++x) {
-        planeIdx = indices[y * w + x];
+    for (let y = 0; y < h; ++y) {
+      for (let x = 0; x < w; ++x) {
+        const planeIdx = indices[y * w + x];
 
         v[0] = sin_theta[y] * cos_phi[x];
         v[1] = sin_theta[y] * sin_phi[x];
         v[2] = cos_theta[y];
 
         if (planeIdx > 0) {
-          plane = planes[planeIdx];
+          const plane = planes[planeIdx];
 
-          t = Math.abs(
+          const t = Math.abs(
             plane.d /
               (v[0] * plane.n[0] + v[1] * plane.n[1] + v[2] * plane.n[2])
           );
@@ -146,28 +130,26 @@ class GoogleStreetViewDepthLoader {
   }
 
   parse(depthMap) {
-    var self = this,
-      depthMapData,
-      header,
-      data,
-      depthMap;
+    const depthMapData = new DataView(depthMap.buffer);
+    this.header = this.parseHeader(depthMapData);
+    this.data = this.parsePlanes(this.header, depthMapData);
+    const res = this.computeDepthMap(
+      this.header,
+      this.data.indices,
+      this.data.planes
+    );
 
-    depthMapData = new DataView(depthMap.buffer);
-    header = self.parseHeader(depthMapData);
-    data = self.parsePlanes(header, depthMapData);
-    depthMap = self.computeDepthMap(header, data.indices, data.planes);
-
-    return depthMap;
+    return res;
   }
 
   createEmptyDepthMap() {
-    var depthMap = {
+    const depthMap = {
       width: 512,
       height: 256,
       depthMap: new Float32Array(512 * 256),
     };
-    for (var i = 0; i < 512 * 256; ++i)
-      depthMap.depthMap[i] = 9999999999999999999;
+    for (let i = 0; i < 512 * 256; ++i)
+      depthMap.depthMap[i] = Number.MAX_SAFE_INTEGER;
     return depthMap;
   }
 }
