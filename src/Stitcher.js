@@ -77,7 +77,7 @@ class Stitcher {
     return new Promise((resolve, reject) => {
       this.resolve = resolve;
       this.reject = reject;
-      const concurrent = Math.min(this.queue.length, 1);
+      const concurrent = Math.min(this.queue.length, 50);
       for (let i = 0; i < concurrent; i++) {
         this.processQueue();
       }
