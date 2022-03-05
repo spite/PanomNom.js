@@ -7,7 +7,8 @@ PanomNom.js is a spiritual succesor to [GSVPano.js](https://github.com/spite/GSV
 Current supported sources
 
 - Google Street View panoramas
-- Google PhotoSpheres
+- Google PhotoSpheres (seems flaky since servers sometimes don't return a CORS header)
+- Google Street View panorama depth and planes info (mostly working)
 
 ### How to use
 
