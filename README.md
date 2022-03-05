@@ -75,6 +75,10 @@ Please see the examples folder for proper implementations of each case.
 [Street View panorama from lat,lng](https://spite.github.io/PanomNom.js/examples/basic/sv-location.html)  
 [Street View panorama from URL](https://spite.github.io/PanomNom.js/examples/basic/sv-url.html)
 
+A more complete example, with Leaflet map control and more:
+
+[Floating Shiny Knot](https://spite.github.io/FloatingShinyKnot/)
+
 # License
 
 MIT licensed
