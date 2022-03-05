@@ -2,6 +2,8 @@
 
 Panorama fetching tools for JavaScript
 
+PanomNom.js is a spiritual succesor to [GSVPano.js](https://github.com/spite/GSVPano.js/). This new version is updated to use ES6 features like modules and async/await.
+
 Current supported sources
 
 - Google Street View panoramas
