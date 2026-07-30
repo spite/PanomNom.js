@@ -86,10 +86,11 @@
       <div id="canvasContainer"></div>
     </section>
     <script src="https://maps.google.com/maps/api/js"></script>
-    <script src="../../src/zpipe.min.js"></script>
     <script type="module">
-      import { GoogleStreetViewLoader } from "../../src/PanomNom.js";
-      import { GoogleStreetViewDepthLoader } from "../../src/GoogleStreetViewDepthLoader.js";
+      import {
+        GoogleStreetViewLoader,
+        GoogleStreetViewDepthLoader,
+      } from "../../src/PanomNom.js";
 
       var messageDiv = document.getElementById("messageDiv");
       var errorDiv = document.getElementById("errorDiv");
@@ -112,17 +113,23 @@
 
       showProgress("Starting.");
 
-      async function load(id) {
-        const depthLoader = new GoogleStreetViewDepthLoader();
-        const res = await depthLoader.load(id);
-
+      // Depths are metres, and the sky is Infinity, so they have to be scaled
+      // into 0-255 to be visible at all.
+      function drawDepthMap(res) {
         const canvas = document.createElement("canvas");
         canvas.width = res.width;
         canvas.height = res.height;
         const ctx = canvas.getContext("2d");
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const imageData = ctx.createImageData(canvas.width, canvas.height);
+
+        let max = 0;
+        for (const d of res.depthMap) {
+          if (Number.isFinite(d) && d > max) max = d;
+        }
+
         for (let i = 0; i < res.depthMap.length; i++) {
-          const c = res.depthMap[i];
+          const d = res.depthMap[i];
+          const c = Number.isFinite(d) ? Math.round((d / max) * 255) : 255;
           imageData.data[i * 4] = c;
           imageData.data[i * 4 + 1] = c;
           imageData.data[i * 4 + 2] = c;
@@ -130,7 +137,9 @@
         }
         ctx.putImageData(imageData, 0, 0);
         canvasContainer.append(canvas);
+      }
 
+      async function load(id) {
         showProgress(`Loading ${id}`);
         const loader = new GoogleStreetViewLoader();
 
@@ -139,6 +148,9 @@
         });
 
         try {
+          const depthLoader = new GoogleStreetViewDepthLoader();
+          drawDepthMap(await depthLoader.load(id));
+
           await loader.load(id, 3);
 
           showProgress("Finished.");
@@ -150,13 +162,13 @@
               ".<br/>"
           );
         } catch (e) {
-          if (e === "ZERO_RESULTS") {
-            showError("No results");
-          } else if (e === "NO_IMAGE") {
-            showError("Could not load image.");
-          } else {
-            showError(e.message);
-          }
+          showError(
+            e.code === "ZERO_RESULTS"
+              ? "No results"
+              : e.code === "NO_IMAGE"
+              ? "Could not load image."
+              : e.message
+          );
         }
       }
 

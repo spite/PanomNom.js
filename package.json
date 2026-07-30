@@ -1,0 +1,44 @@
+{
+  "name": "panomnom.js",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Panorama fetching tools for JavaScript",
+  "type": "module",
+  "main": "./build/PanomNom.module.js",
+  "module": "./build/PanomNom.module.js",
+  "exports": {
+    ".": "./build/PanomNom.module.js",
+    "./src/*": "./src/*"
+  },
+  "files": [
+    "src",
+    "build",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "bash tools/build.sh",
+    "test": "node --test test/",
+    "check": "for f in src/*.js; do node --check \"$f\" || exit 1; done"
+  },
+  "keywords": [
+    "panorama",
+    "streetview",
+    "photosphere",
+    "equirectangular",
+    "webgl"
+  ],
+  "author": "Jaume Sanchez Elias",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spite/PanomNom.js.git"
+  },
+  "homepage": "https://github.com/spite/PanomNom.js#readme",
+  "bugs": {
+    "url": "https://github.com/spite/PanomNom.js/issues"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
+  }
+}
