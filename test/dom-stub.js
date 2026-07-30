@@ -6,6 +6,10 @@
 
 const loads = [];
 
+// urls containing "flaky-N" fail their first N attempts, then succeed. Used to
+// exercise the retry path without relying on the network.
+const attempts = new Map();
+
 class FakeImage {
   constructor() {
     this.naturalWidth = 512;
@@ -32,9 +36,18 @@ class FakeImage {
     this._src = value;
     if (!value) return;
     loads.push(value);
-    queueMicrotask(() => {
+    const flaky = value.match(/flaky-(\d+)/);
+    // A macrotask, not a microtask: real image loads cannot all settle inside
+    // one turn, and tests that race the retry backoff depend on that.
+    setTimeout(() => {
+      if (flaky) {
+        const seen = (attempts.get(value) ?? 0) + 1;
+        attempts.set(value, seen);
+        this._emit(seen <= Number(flaky[1]) ? "error" : "load");
+        return;
+      }
       this._emit(value.includes("fail") ? "error" : "load");
-    });
+    }, 0);
   }
 
   get src() {
@@ -75,6 +88,7 @@ function installDOM() {
     },
   };
   loads.length = 0;
+  attempts.clear();
 }
 
 export { installDOM, loads, FakeCanvas };

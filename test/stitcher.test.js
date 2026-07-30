@@ -55,9 +55,10 @@ test("a failing run leaves no queued work behind", async () => {
 
 test("a failing run stops fetching the remaining tiles", async () => {
   const s = new Stitcher(new FakeCanvas());
-  // More tiles than the 50-wide worker pool, so there is a tail to cancel.
+  // Far more tiles than the pool can drain while the failing tile exhausts its
+  // retries, so there is still a tail left to cancel when the run gives up.
   s.addTileTask(tile("https://example.com/fail-1"));
-  for (let i = 0; i < 200; i++) {
+  for (let i = 0; i < 100000; i++) {
     s.addTileTask(tile(`https://example.com/ok-${i}`));
   }
 
@@ -65,7 +66,7 @@ test("a failing run stops fetching the remaining tiles", async () => {
   await new Promise((r) => setTimeout(r, 50));
 
   assert.ok(
-    loads.length < 201,
+    loads.length < 100001,
     `expected the run to abort early, but all ${loads.length} tiles were fetched`
   );
 });
@@ -128,4 +129,34 @@ test("progress reaches 100% on a successful run", async () => {
 
   await s.process();
   assert.equal(seen.at(-1), 100);
+});
+
+test("a tile that fails once is retried rather than failing the run", async () => {
+  const s = new Stitcher(new FakeCanvas());
+  s.addTileTask(tile("https://example.com/flaky-1-once"));
+  s.addTileTask(tile("https://example.com/ok-1"));
+
+  assert.equal(await s.process(), true);
+  assert.equal(s.loaded, 2);
+  assert.equal(s.retries, 1);
+});
+
+test("retries are bounded, so a dead tile still fails the run", async () => {
+  const s = new Stitcher(new FakeCanvas());
+  // Fails more times than MAX_ATTEMPTS allows.
+  s.addTileTask(tile("https://example.com/flaky-99"));
+
+  await assert.rejects(s.process(), (e) => e.code === ErrorCodes.NO_IMAGE);
+  assert.equal(loads.filter((u) => u.includes("flaky-99")).length, 3);
+});
+
+test("retry count resets between runs", async () => {
+  const s = new Stitcher(new FakeCanvas());
+  s.addTileTask(tile("https://example.com/flaky-1-reset"));
+  await s.process();
+  assert.equal(s.retries, 1);
+
+  s.addTileTask(tile("https://example.com/ok-2"));
+  await s.process();
+  assert.equal(s.retries, 0);
 });

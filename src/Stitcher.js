@@ -2,6 +2,13 @@ import { PanomNomError, ErrorCodes } from "./errors.js";
 
 const MAX_CONCURRENT = 50;
 
+// Firing every tile at once can make the browser drop image loads that would
+// otherwise succeed, and one dropped tile used to fail the whole panorama.
+const MAX_ATTEMPTS = 3;
+const RETRY_DELAY = 250;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // Loads a tile into an Image. Rejects with NO_IMAGE if the request fails, or
 // with `run.reason` if the run has been cancelled.
 //
@@ -60,6 +67,7 @@ class Stitcher {
     this.queue = [];
     this.toLoad = 0;
     this.loaded = 0;
+    this.retries = 0;
     this.onProgress = null;
   }
 
@@ -67,6 +75,7 @@ class Stitcher {
     this.queue.length = 0;
     this.toLoad = 0;
     this.loaded = 0;
+    this.retries = 0;
   }
 
   addTileTask(task) {
@@ -101,10 +110,25 @@ class Stitcher {
     const run = { cancelled: false, reason: null, inflight: new Set() };
     let next = 0;
 
+    // Retry a tile a couple of times before giving up on the whole run. Image
+    // events can't tell a 404 from a dropped connection, so this retries both;
+    // a genuinely missing tile just costs MAX_ATTEMPTS requests.
+    const loadTileWithRetry = async (task) => {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          return await loadTile(task, run);
+        } catch (e) {
+          if (run.cancelled || attempt >= MAX_ATTEMPTS) throw e;
+          this.retries++;
+          await sleep(RETRY_DELAY * attempt);
+        }
+      }
+    };
+
     const worker = async () => {
       while (next < tasks.length && !run.cancelled) {
         const task = tasks[next++];
-        const img = await loadTile(task, run);
+        const img = await loadTileWithRetry(task);
         this.ctx.drawImage(
           img,
           0,

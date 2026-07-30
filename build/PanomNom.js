@@ -52,6 +52,9 @@ var PANOMNOM = (() => {
 
   // src/Stitcher.js
   var MAX_CONCURRENT = 50;
+  var MAX_ATTEMPTS = 3;
+  var RETRY_DELAY = 250;
+  var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   function loadTile(task, run) {
     return new Promise((resolve, reject) => {
       if (run.cancelled) {
@@ -94,12 +97,14 @@ var PANOMNOM = (() => {
       this.queue = [];
       this.toLoad = 0;
       this.loaded = 0;
+      this.retries = 0;
       this.onProgress = null;
     }
     reset() {
       this.queue.length = 0;
       this.toLoad = 0;
       this.loaded = 0;
+      this.retries = 0;
     }
     addTileTask(task) {
       this.queue.push(task);
@@ -121,10 +126,21 @@ var PANOMNOM = (() => {
       }
       const run = { cancelled: false, reason: null, inflight: /* @__PURE__ */ new Set() };
       let next = 0;
+      const loadTileWithRetry = async (task) => {
+        for (let attempt = 1; ; attempt++) {
+          try {
+            return await loadTile(task, run);
+          } catch (e) {
+            if (run.cancelled || attempt >= MAX_ATTEMPTS) throw e;
+            this.retries++;
+            await sleep(RETRY_DELAY * attempt);
+          }
+        }
+      };
       const worker = async () => {
         while (next < tasks.length && !run.cancelled) {
           const task = tasks[next++];
-          const img = await loadTile(task, run);
+          const img = await loadTileWithRetry(task);
           this.ctx.drawImage(
             img,
             0,
