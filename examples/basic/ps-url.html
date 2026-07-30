@@ -70,7 +70,7 @@
   <body>
     <section>
       <h1>PanomNom.js Basic Usage</h1>
-      <h2>GooglePhotoSphereLoader.load + getIdFromURL</h2>
+      <h2>GooglePhotoSphereLoader.loadFromURL</h2>
       <p>
         This example shows how to set GooglePhotoSphereLoader to load from a
         google maps URL.
@@ -78,7 +78,7 @@
       <p>
         <i
           >Try
-          https://www.google.com/maps/@-23.5516916,-46.6320247,3a,75y,90t/data=!3m6!1e1!3m4!1sAF1QipMKVZBKb5dP2my1FWB2ljCp2vXqiISTzj056YD_!2e10!7i7776!8i3888</i
+          https://www.google.com/maps/place/Barcelona,+Spain/@41.3818031,2.1713843,3a,75y,256.77h,90t/data=!3m8!1e1!3m6!1sCIHM0ogKEICAgICE_enPsQE!2e10!3e11!6shttps:%2F%2Flh3.googleusercontent.com%2Fgpms-cs-s%2FAFP8RcO4Fenig1v_I8tE6isuUcWM2zG8CzAHgncs_BJTXl0SBTmU2_2Ovk7231Tul9dYx1eurW9yFZxbFjlCyHF58Fy2Lw506aVYXA_UyOaZW0TUFvLjB6u37Ix4rD1XJPmbceZflqiTBA%3Dw900-h600-k-no-pi0-ya254.9278712878522-ro0-fo100!7i9772!8i4886!4m6!3m5!1s0x12a49816718e30e5:0x44b0fb3d4f47660a!8m2!3d41.3874374!4d2.1686496!16zL20vMDFmNjI</i
         >
       </p>
       <form id="URLForm">
@@ -93,7 +93,7 @@
 
     <script src="https://maps.google.com/maps/api/js"></script>
     <script type="module">
-      import { GooglePhotoSphereLoader, getIdFromURL } from "../../src/PanomNom.js";
+      import { GooglePhotoSphereLoader } from "../../src/PanomNom.js";
 
       var messageDiv = document.getElementById("messageDiv");
       var errorDiv = document.getElementById("errorDiv");
@@ -128,9 +128,11 @@
       async function load(url) {
         showMessage("");
         try {
-          const id = getIdFromURL(url);
-          showProgress(`Loading ${id}`);
-          await loader.load(id, 3);
+          showProgress(`Loading ${url.slice(0, 60)}...`);
+          // loadFromURL, not getIdFromURL + load: newer photo spheres are
+          // served from a media id that exists only in the URL, so extracting
+          // the panorama id on its own loses the only way to reach the tiles.
+          await loader.loadFromURL(url, 3);
 
           showProgress("Finished.");
           showError("");

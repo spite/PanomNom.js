@@ -62,6 +62,13 @@
         This example shows how to set GoogleStreetViewLoader + getIdByLocation
         to load based on location.
       </p>
+      <p>
+        <i
+          >Reload for a random location from a built-in list, or pin one with a
+          <code>#lat,lng</code> hash &mdash; for example
+          <a href="#41.3817817,2.1716902">#41.3817817,2.1716902</a>.</i
+        >
+      </p>
       <div id="progressDiv"></div>
       <div id="messageDiv"></div>
       <div id="errorDiv"></div>
@@ -114,10 +121,19 @@
           showProgress("Loaded " + p.toFixed(0) + "%");
         });
 
+        // Without a hash this picks one of the locations above at random, so
+        // reloading gives you a different panorama each time.
         let pos;
-        if (window.location.hash) {
-          parts = window.location.hash.substr(1).split(",");
-          pos = { lat: parts[0], lng: parts[1] };
+        const hash = window.location.hash.slice(1);
+        if (hash) {
+          // Modules are strict mode, so this needs declaring: assigning to an
+          // undeclared `parts` threw a ReferenceError and the hash was ignored.
+          const [lat, lng] = hash.split(",").map(Number);
+          if (Number.isNaN(lat) || Number.isNaN(lng)) {
+            showError(`Could not read a lat,lng from "#${hash}"`);
+            return;
+          }
+          pos = { lat, lng };
         } else {
           pos = locations[Math.floor(Math.random() * locations.length)];
         }

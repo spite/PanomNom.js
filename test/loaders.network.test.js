@@ -457,3 +457,32 @@ test("place URL photo sphere loads, including partial edge tiles", opts, async (
     assert.equal(failures.length, 0, `z${zoom} failed: ${failures.join(", ")}`);
   }
 });
+
+// The ps-url example previously did getIdFromURL + load(id), which discards the
+// !6s media id and so cannot fetch a modern photo sphere's tiles at all.
+test("loadFromURL succeeds where load(getIdFromURL(url)) cannot", opts, async () => {
+  installFetchingImage();
+  delete globalThis.google;
+
+  const { GooglePhotoSphereLoader } = await import(
+    "../src/GooglePhotoSphereLoader.js"
+  );
+  const { getIdFromURL } = await import("../src/utils.js");
+  const { ErrorCodes } = await import("../src/errors.js");
+
+  const id = getIdFromURL(PLACE_PS_URL);
+
+  // The id alone routes to lh3.ggpht.com/p/<id>, which 400s for this
+  // generation of photo sphere.
+  await assert.rejects(
+    new GooglePhotoSphereLoader().load(id, 0),
+    (e) => e.code === ErrorCodes.NO_IMAGE
+  );
+
+  // The same panorama, reached through its URL.
+  const loader = new GooglePhotoSphereLoader();
+  loads.length = 0;
+  await loader.loadFromURL(PLACE_PS_URL, 0);
+  assert.equal(loads.length, 1);
+  assert.ok(loads[0].startsWith("https://lh3.googleusercontent.com/"));
+});
