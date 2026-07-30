@@ -9,6 +9,8 @@ import assert from "node:assert/strict";
 
 import { installDOM, loads, FakeCanvas } from "./dom-stub.js";
 
+globalThis.__realFetch = globalThis.fetch;
+
 const online = process.env.PANOMNOM_NETWORK === "1";
 const opts = { skip: online ? false : "set PANOMNOM_NETWORK=1 to run" };
 
@@ -24,36 +26,20 @@ const SHORT_FORM_PANO = "4avA1iH-YV3U2s2rK12tqA";
 function installFetchingImage() {
   installDOM();
   const failures = [];
-  globalThis.Image = class {
-    constructor() {
-      this._l = {};
-      this.naturalWidth = 512;
-      this.naturalHeight = 512;
-    }
-    addEventListener(t, f) {
-      (this._l[t] ||= []).push(f);
-    }
-    removeEventListener(t, f) {
-      this._l[t] = (this._l[t] || []).filter((x) => x !== f);
-    }
-    set src(u) {
-      if (!u) return;
-      loads.push(u);
-      fetch(u)
-        .then((r) => {
-          if (!r.ok) {
-            failures.push(`${r.status} ${u}`);
-            throw new Error(String(r.status));
-          }
-          return r.arrayBuffer();
-        })
-        .then(() => this._l.load?.forEach((f) => f()))
-        .catch(() => this._l.error?.forEach((f) => f()));
-    }
-    get src() {
-      return "";
-    }
+  // Real network, real status codes. Only decoding is stubbed, since node has
+  // no createImageBitmap and the pixels are not what these tests check.
+  const realFetch = globalThis.__realFetch;
+  globalThis.fetch = async (url, init) => {
+    loads.push(url);
+    const res = await realFetch(url, init);
+    if (!res.ok) failures.push(`${res.status} ${url}`);
+    return res;
   };
+  globalThis.createImageBitmap = async () => ({
+    width: 512,
+    height: 512,
+    close() {},
+  });
   return failures;
 }
 

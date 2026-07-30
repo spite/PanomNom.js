@@ -40,7 +40,10 @@ var PANOMNOM = (() => {
     NO_IMAGE: "NO_IMAGE",
     ZERO_RESULTS: "ZERO_RESULTS",
     BAD_METADATA: "BAD_METADATA",
-    INVALID_ZOOM: "INVALID_ZOOM"
+    INVALID_ZOOM: "INVALID_ZOOM",
+    // Google is throttling this client. Distinguishable only because tiles are
+    // fetched rather than loaded through an <img>, which cannot report a status.
+    RATE_LIMITED: "RATE_LIMITED"
   };
   var PanomNomError = class extends Error {
     constructor(code, message, options) {
@@ -54,48 +57,57 @@ var PANOMNOM = (() => {
   var MAX_CONCURRENT = 6;
   var MAX_ATTEMPTS = 3;
   var RETRY_BASE_DELAY = 600;
+  var MAX_RETRY_AFTER = 1e4;
   var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   function retryDelay(attempt) {
     return RETRY_BASE_DELAY * 2 ** (attempt - 1) * (0.5 + Math.random());
   }
-  function loadTile(task, run) {
-    return new Promise((resolve, reject) => {
-      if (run.cancelled) {
-        reject(run.reason);
-        return;
-      }
-      const img = new Image();
-      img.decoding = "async";
-      img.crossOrigin = "anonymous";
-      const cleanup = () => {
-        img.removeEventListener("load", onLoad);
-        img.removeEventListener("error", onError);
-        run.inflight.delete(cancel);
-      };
-      const onLoad = () => {
-        cleanup();
-        resolve(img);
-      };
-      const onError = () => {
-        cleanup();
-        reject(
-          new PanomNomError(ErrorCodes.NO_IMAGE, `Could not load tile ${task.url}`)
-        );
-      };
-      const cancel = () => {
-        cleanup();
-        img.src = "";
-        reject(run.reason);
-      };
-      img.addEventListener("load", onLoad);
-      img.addEventListener("error", onError);
-      run.inflight.add(cancel);
-      img.src = task.url;
-    });
+  function parseRetryAfter(value) {
+    if (!value) return null;
+    const seconds = Number(value);
+    if (Number.isFinite(seconds)) return seconds * 1e3;
+    const date = Date.parse(value);
+    return Number.isNaN(date) ? null : Math.max(0, date - Date.now());
+  }
+  async function loadTile(task, signal) {
+    let res;
+    try {
+      res = await fetch(task.url, { mode: "cors", signal });
+    } catch (e) {
+      if (signal.aborted) throw signal.reason ?? e;
+      throw new PanomNomError(
+        ErrorCodes.NO_IMAGE,
+        `Could not load tile ${task.url}`,
+        { cause: e }
+      );
+    }
+    if (res.status === 429 || res.status === 503) {
+      const error = new PanomNomError(
+        ErrorCodes.RATE_LIMITED,
+        `Google is rate limiting tile requests (HTTP ${res.status}). Wait a few minutes, or construct the loader with a lower concurrency.`
+      );
+      error.retryAfter = parseRetryAfter(res.headers.get("retry-after"));
+      throw error;
+    }
+    if (!res.ok) {
+      throw new PanomNomError(
+        ErrorCodes.NO_IMAGE,
+        `Could not load tile ${task.url} (HTTP ${res.status})`
+      );
+    }
+    try {
+      return await createImageBitmap(await res.blob());
+    } catch (e) {
+      throw new PanomNomError(
+        ErrorCodes.NO_IMAGE,
+        `Tile ${task.url} was not a decodable image`,
+        { cause: e }
+      );
+    }
   }
   var Stitcher = class {
     // `concurrency` is worth lowering further if you are loading several
-    // panoramas in a row and seeing 429s.
+    // panoramas in a row and seeing rate limits.
     constructor(canvas, { concurrency = MAX_CONCURRENT } = {}) {
       this.concurrency = concurrency;
       this.canvas = canvas;
@@ -130,34 +142,41 @@ var PANOMNOM = (() => {
       if (tasks.length === 0) {
         return true;
       }
-      const run = { cancelled: false, reason: null, inflight: /* @__PURE__ */ new Set() };
+      const controller = new AbortController();
       let next = 0;
       const loadTileWithRetry = async (task) => {
         for (let attempt = 1; ; attempt++) {
           try {
-            return await loadTile(task, run);
+            return await loadTile(task, controller.signal);
           } catch (e) {
-            if (run.cancelled || attempt >= MAX_ATTEMPTS) throw e;
+            if (controller.signal.aborted || attempt >= MAX_ATTEMPTS) throw e;
+            if (e.code === ErrorCodes.RATE_LIMITED) {
+              if (e.retryAfter === null || e.retryAfter > MAX_RETRY_AFTER) throw e;
+              this.retries++;
+              await sleep(e.retryAfter);
+              continue;
+            }
             this.retries++;
             await sleep(retryDelay(attempt));
           }
         }
       };
       const worker = async () => {
-        while (next < tasks.length && !run.cancelled) {
+        while (next < tasks.length && !controller.signal.aborted) {
           const task = tasks[next++];
-          const img = await loadTileWithRetry(task);
+          const bitmap = await loadTileWithRetry(task);
           this.ctx.drawImage(
-            img,
+            bitmap,
             0,
             0,
-            img.naturalWidth,
-            img.naturalHeight,
+            bitmap.width,
+            bitmap.height,
             task.x,
             task.y,
             task.w,
             task.h
           );
+          bitmap.close?.();
           this.loaded++;
           this.updateProgress();
         }
@@ -169,9 +188,7 @@ var PANOMNOM = (() => {
       try {
         await Promise.all(workers);
       } catch (e) {
-        run.cancelled = true;
-        run.reason = e;
-        for (const cancel of [...run.inflight]) cancel();
+        controller.abort(e);
         await Promise.allSettled(workers);
         throw e;
       }

@@ -7,12 +7,12 @@ import { PanomNomError, ErrorCodes } from "./errors.js";
 // limit has to be imposed here.
 const MAX_CONCURRENT = 6;
 
-// One dropped tile used to fail the whole panorama, so tiles are retried. Image
-// events cannot report a status code, so a 429 is indistinguishable from a
-// dropped connection: back off hard and stop early rather than amplifying a
-// rate limit that is already biting.
+// One dropped tile should not lose the whole panorama, so tiles are retried.
 const MAX_ATTEMPTS = 3;
 const RETRY_BASE_DELAY = 600;
+
+// Cap on how long a Retry-After will be honoured before giving up instead.
+const MAX_RETRY_AFTER = 10000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -22,60 +22,67 @@ function retryDelay(attempt) {
   return RETRY_BASE_DELAY * 2 ** (attempt - 1) * (0.5 + Math.random());
 }
 
-// Loads a tile into an Image. Rejects with NO_IMAGE if the request fails, or
-// with `run.reason` if the run has been cancelled.
+// Retry-After is either a delay in seconds or an HTTP date.
+function parseRetryAfter(value) {
+  if (!value) return null;
+
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return seconds * 1000;
+
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? null : Math.max(0, date - Date.now());
+}
+
+// Fetches a tile and decodes it to an ImageBitmap.
 //
-// Cancellation goes through `run.inflight` rather than an abort listener per
-// tile, which would put one listener per in-flight tile on a single signal and
-// trip EventTarget's leak warning.
-function loadTile(task, run) {
-  return new Promise((resolve, reject) => {
-    if (run.cancelled) {
-      reject(run.reason);
-      return;
-    }
+// This goes through fetch rather than an <img> so the status code is visible.
+// An <img> reports only "error", which makes a 429 indistinguishable from a
+// dropped connection — and retrying a rate limit is the one response that makes
+// it worse.
+async function loadTile(task, signal) {
+  let res;
+  try {
+    res = await fetch(task.url, { mode: "cors", signal });
+  } catch (e) {
+    if (signal.aborted) throw signal.reason ?? e;
+    throw new PanomNomError(
+      ErrorCodes.NO_IMAGE,
+      `Could not load tile ${task.url}`,
+      { cause: e }
+    );
+  }
 
-    const img = new Image();
-    img.decoding = "async";
-    img.crossOrigin = "anonymous";
+  if (res.status === 429 || res.status === 503) {
+    const error = new PanomNomError(
+      ErrorCodes.RATE_LIMITED,
+      `Google is rate limiting tile requests (HTTP ${res.status}). ` +
+        `Wait a few minutes, or construct the loader with a lower concurrency.`
+    );
+    error.retryAfter = parseRetryAfter(res.headers.get("retry-after"));
+    throw error;
+  }
 
-    // Detach everything before settling, so a cancelled tile can't fire again
-    // when we clear its src below.
-    const cleanup = () => {
-      img.removeEventListener("load", onLoad);
-      img.removeEventListener("error", onError);
-      run.inflight.delete(cancel);
-    };
+  if (!res.ok) {
+    throw new PanomNomError(
+      ErrorCodes.NO_IMAGE,
+      `Could not load tile ${task.url} (HTTP ${res.status})`
+    );
+  }
 
-    const onLoad = () => {
-      cleanup();
-      resolve(img);
-    };
-
-    const onError = () => {
-      cleanup();
-      reject(
-        new PanomNomError(ErrorCodes.NO_IMAGE, `Could not load tile ${task.url}`)
-      );
-    };
-
-    const cancel = () => {
-      cleanup();
-      // Assigning an empty src aborts the in-flight request.
-      img.src = "";
-      reject(run.reason);
-    };
-
-    img.addEventListener("load", onLoad);
-    img.addEventListener("error", onError);
-    run.inflight.add(cancel);
-    img.src = task.url;
-  });
+  try {
+    return await createImageBitmap(await res.blob());
+  } catch (e) {
+    throw new PanomNomError(
+      ErrorCodes.NO_IMAGE,
+      `Tile ${task.url} was not a decodable image`,
+      { cause: e }
+    );
+  }
 }
 
 class Stitcher {
   // `concurrency` is worth lowering further if you are loading several
-  // panoramas in a row and seeing 429s.
+  // panoramas in a row and seeing rate limits.
   constructor(canvas, { concurrency = MAX_CONCURRENT } = {}) {
     this.concurrency = concurrency;
     this.canvas = canvas;
@@ -123,18 +130,25 @@ class Stitcher {
 
     // One failure aborts the whole run: there is no point downloading the rest
     // of a panorama that cannot be completed.
-    const run = { cancelled: false, reason: null, inflight: new Set() };
+    const controller = new AbortController();
     let next = 0;
 
-    // Retry a tile a couple of times before giving up on the whole run. Image
-    // events can't tell a 404 from a dropped connection, so this retries both;
-    // a genuinely missing tile just costs MAX_ATTEMPTS requests.
     const loadTileWithRetry = async (task) => {
       for (let attempt = 1; ; attempt++) {
         try {
-          return await loadTile(task, run);
+          return await loadTile(task, controller.signal);
         } catch (e) {
-          if (run.cancelled || attempt >= MAX_ATTEMPTS) throw e;
+          if (controller.signal.aborted || attempt >= MAX_ATTEMPTS) throw e;
+
+          if (e.code === ErrorCodes.RATE_LIMITED) {
+            // Only wait if the server said how long and it is short. Otherwise
+            // fail now: retrying into a limiter is what deepens it.
+            if (e.retryAfter === null || e.retryAfter > MAX_RETRY_AFTER) throw e;
+            this.retries++;
+            await sleep(e.retryAfter);
+            continue;
+          }
+
           this.retries++;
           await sleep(retryDelay(attempt));
         }
@@ -142,20 +156,21 @@ class Stitcher {
     };
 
     const worker = async () => {
-      while (next < tasks.length && !run.cancelled) {
+      while (next < tasks.length && !controller.signal.aborted) {
         const task = tasks[next++];
-        const img = await loadTileWithRetry(task);
+        const bitmap = await loadTileWithRetry(task);
         this.ctx.drawImage(
-          img,
+          bitmap,
           0,
           0,
-          img.naturalWidth,
-          img.naturalHeight,
+          bitmap.width,
+          bitmap.height,
           task.x,
           task.y,
           task.w,
           task.h
         );
+        bitmap.close?.();
         this.loaded++;
         this.updateProgress();
       }
@@ -169,11 +184,9 @@ class Stitcher {
     try {
       await Promise.all(workers);
     } catch (e) {
-      run.cancelled = true;
-      run.reason = e;
-      // Cancel whatever is still in the air, then let the workers settle so
-      // none of them draw after we return.
-      for (const cancel of [...run.inflight]) cancel();
+      // Cancel whatever is still in flight, then let the workers settle so none
+      // of them draw after we return.
+      controller.abort(e);
       await Promise.allSettled(workers);
       throw e;
     }

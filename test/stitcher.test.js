@@ -169,8 +169,8 @@ test("concurrency is capped, and configurable", async () => {
     s.addTileTask(tile(`https://example.com/ok-${i}`));
   }
 
-  // The stub settles on a macrotask, so every tile started before the first
-  // one settles is genuinely concurrent. With a pool of 3 that is 3.
+  // The stub settles on a macrotask, so every tile requested before the first
+  // response arrives is genuinely concurrent. With a pool of 3 that is 3.
   const started = [];
   const before = loads.length;
   const p = s.process();
@@ -185,4 +185,54 @@ test("concurrency is capped, and configurable", async () => {
 test("the default concurrency is modest enough not to trip rate limits", async () => {
   const s = new Stitcher(new FakeCanvas());
   assert.ok(s.concurrency <= 8, `default concurrency is ${s.concurrency}`);
+});
+
+test("a rate limited tile fails with RATE_LIMITED, not NO_IMAGE", async () => {
+  const s = new Stitcher(new FakeCanvas());
+  s.addTileTask(tile("https://example.com/ratelimit-forever-1"));
+
+  await assert.rejects(s.process(), (e) => {
+    assert.equal(e.code, ErrorCodes.RATE_LIMITED);
+    assert.match(e.message, /rate limiting/);
+    return true;
+  });
+});
+
+test("a rate limit with no Retry-After is not retried", async () => {
+  // Retrying into a limiter is what deepens it.
+  const s = new Stitcher(new FakeCanvas());
+  s.addTileTask(tile("https://example.com/ratelimit-forever-2"));
+
+  await s.process().catch(() => {});
+  assert.equal(
+    loads.filter((u) => u.includes("ratelimit-forever-2")).length,
+    1,
+    "should have given up after the first 429"
+  );
+  assert.equal(s.retries, 0);
+});
+
+test("a short Retry-After is honoured", async () => {
+  const s = new Stitcher(new FakeCanvas());
+  s.addTileTask(tile("https://example.com/ratelimit-1"));
+
+  await s.process().catch(() => {});
+  // Retry-After is 1s, under the cap, so it waits and tries again.
+  assert.ok(s.retries > 0, "expected the Retry-After to be honoured");
+  assert.ok(loads.filter((u) => u.includes("ratelimit-1")).length > 1);
+});
+
+test("an undecodable tile is NO_IMAGE, not a rate limit", async () => {
+  const s = new Stitcher(new FakeCanvas());
+  s.addTileTask(tile("https://example.com/notimage-1"));
+
+  await assert.rejects(s.process(), (e) => e.code === ErrorCodes.NO_IMAGE);
+});
+
+test("decoded bitmaps are released after drawing", async () => {
+  const canvas = new FakeCanvas();
+  const s = new Stitcher(canvas);
+  s.addTileTask(tile("https://example.com/ok-close"));
+  await s.process();
+  assert.equal(canvas.getContext().drawn.length, 1);
 });

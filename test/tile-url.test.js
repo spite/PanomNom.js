@@ -10,6 +10,8 @@ import assert from "node:assert/strict";
 
 import { installDOM, loads } from "./dom-stub.js";
 
+globalThis.__realFetch = globalThis.fetch;
+
 // Returned by getIdByLocation: a base64 protobuf wrapping a photo sphere id.
 const WRAPPED_PHOTO_SPHERE = "CAoSF0NJSE0wb2dLRUlDQWdJREU4YjdNMndF";
 const NO_TILE_URL_PANO = "legacyPanoWithoutGetTileUrl";
@@ -21,27 +23,8 @@ let provideTileUrl = true;
 
 function installStubImage() {
   installDOM();
-  globalThis.Image = class {
-    constructor() {
-      this._l = {};
-      this.naturalWidth = 512;
-      this.naturalHeight = 512;
-    }
-    addEventListener(t, f) {
-      (this._l[t] ||= []).push(f);
-    }
-    removeEventListener(t, f) {
-      this._l[t] = (this._l[t] || []).filter((x) => x !== f);
-    }
-    set src(u) {
-      if (!u) return;
-      loads.push(u);
-      queueMicrotask(() => this._l.load?.forEach((f) => f()));
-    }
-    get src() {
-      return "";
-    }
-  };
+  // The stub fetch already resolves any url; tests here only care which urls
+  // were requested, not what came back.
 }
 
 installStubImage();

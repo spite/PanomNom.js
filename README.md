@@ -16,7 +16,15 @@ Current supported sources
 > const loader = new GoogleStreetViewLoader({ concurrency: 3 });
 > ```
 >
-> A tile request that is being rate-limited returns 429, but image loads cannot report a status code, so it surfaces as `NO_IMAGE` like any other tile failure. If a panorama that previously worked starts failing at 0%, wait a few minutes before retrying.
+> Tiles are fetched rather than loaded through an `<img>`, so a throttled request is reported as its own error rather than being mistaken for a broken tile:
+>
+> ```javascript
+> catch (e) {
+>   if (e.code === ErrorCodes.RATE_LIMITED) { /* wait, don't retry */ }
+> }
+> ```
+>
+> A 429 carrying a short `Retry-After` is waited out; anything longer fails immediately, because retrying into a limiter is what deepens it.
 
 > **Heads up:** this library reads undocumented Google endpoints that are not part of any public API. They can change or disappear without notice, coverage varies by panorama, and using them is likely contrary to the Google Maps Platform Terms of Service. Treat it as a toy, not as infrastructure.
 
@@ -149,6 +157,7 @@ Everything rejects with a `PanomNomError` carrying a `code`, so you can branch o
 | `NO_PANO_ID` | no panorama id could be found in the given URL |
 | `ZERO_RESULTS` | Google has no panorama for that id or location |
 | `NO_IMAGE` | a tile failed to load; the rest of the run is cancelled |
+| `RATE_LIMITED` | Google is throttling tile requests (HTTP 429/503) |
 | `BAD_METADATA` | the metadata response was not in the expected shape |
 | `INVALID_ZOOM` | the requested zoom level does not exist for this panorama |
 
