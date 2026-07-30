@@ -70,12 +70,12 @@
   <body>
     <section>
       <h1>PanomNom.js Basic Usage</h1>
-      <h2>PANOMNOM.GooglePhotoSphereLoader.load</h2>
+      <h2>GooglePhotoSphereLoader.load</h2>
       <p>
-        This example shows how to set PANOMNOM.GooglePhotoSphereLoader to load
-        from a panoId.
+        This example shows how to set GooglePhotoSphereLoader to load from a
+        panoId.
       </p>
-      <p><i>Try f46IuofkqEEAAAGu3PdVPQ</i></p>
+      <p><i>Try AF1QipMKVZBKb5dP2my1FWB2ljCp2vXqiISTzj056YD_</i></p>
       <form id="PanoIdForm">
         <input type="text" id="PanoIdInput" />
         <input type="submit" id="PanoIdFormSubmit" />
@@ -86,8 +86,9 @@
       <div id="canvasContainer"></div>
     </section>
 
-    <script>
-      var l;
+    <script src="https://maps.google.com/maps/api/js"></script>
+    <script type="module">
+      import { GooglePhotoSphereLoader } from "../../src/PanomNom.js";
 
       var messageDiv = document.getElementById("messageDiv");
       var errorDiv = document.getElementById("errorDiv");
@@ -108,38 +109,44 @@
         progressDiv.innerHTML = message;
       }
 
-      window.addEventListener("load", function () {
-        showProgress("Starting.");
+      // Photo spheres are often shot by members of the public, so credit the
+      // author as well as the copyright holder.
+      function attribution({ copyright, author, authorURL }) {
+        const who = authorURL
+          ? `<a href="https:${authorURL}">${author}</a>`
+          : author;
+        return [copyright, who ? `Photo by ${who}` : null]
+          .filter(Boolean)
+          .join(" &middot; ");
+      }
 
-        l = new PANOMNOM.GooglePhotoSphereLoader();
+      async function load(id) {
+        showMessage("");
+        try {
+          showProgress(`Loading ${id}`);
+          await loader.load(id, 3);
 
-        l.addEventListener("load", function () {
           showProgress("Finished.");
           showError("");
-          canvasContainer.appendChild(this.canvas);
-          showMessage(
-            "Panorama loaded, street view data " +
-              this.metadata.Data.copyright +
-              ".<br/>"
-          );
-        });
-
-        l.addEventListener("error", function (e) {
+          canvasContainer.appendChild(loader.canvas);
+          showMessage(attribution(loader.metadata));
+        } catch (e) {
           showError(e.message);
-        });
+        }
+      }
 
-        l.addEventListener("progress", function (e) {
-          showProgress("Loaded " + e.message.toFixed(0) + "%");
-        });
+      showProgress("Starting.");
 
-        PanoIdForm.addEventListener("submit", function (e) {
-          showProgress("Loading " + PanoIdInput.value);
-          l.load(PanoIdInput.value, 3);
-          e.preventDefault();
-        });
+      const loader = new GooglePhotoSphereLoader();
+
+      loader.onProgress((p) => {
+        showProgress("Loaded " + p.toFixed(0) + "%");
+      });
+
+      PanoIdForm.addEventListener("submit", (e) => {
+        load(PanoIdInput.value);
+        e.preventDefault();
       });
     </script>
-    <script src="//maps.google.com/maps/api/js?sensor=false"></script>
-    <script src="../../src/PanomNom.js"></script>
   </body>
 </html>

@@ -78,7 +78,7 @@
       <p style="overflow: auto">
         <i
           >Try
-          https://www.google.com/maps/@51.546483,-0.1293555,29051a,13.1y/data=!3m5!1e1!3m3!1sKGh2_8m7l_ikrgaYrAAFeA!2e0!6shttps:%2F%2Fstreetviewpixels-pa.googleapis.com%2Fv1%2Fthumbnail%3Fpanoid%3DKGh2_8m7l_ikrgaYrAAFeA%26cb_client%3Dsearch.revgeo_and_fetch.gps%26w%3D96%26h%3D64%26yaw%3D45.903923%26pitch%3D0%26thumbfov%3D100</i
+          https://www.google.com/maps/@51.5316182,-0.125108,3a,75y,158.01h,90t/data=!3m6!1e1!3m4!1skCisB_W6mNaYBgdxg0AX8A!2e0!7i16384!8i8192</i
         >
       </p>
       <form id="URLForm">
@@ -132,13 +132,13 @@
               ".<br/>"
           );
         } catch (e) {
-          if (e === "ZERO_RESULTS") {
-            showError("No results");
-          } else if (e === "NO_IMAGE") {
-            showError("Could not load image.");
-          } else {
-            showError(e.message);
-          }
+          showError(
+            e.code === "ZERO_RESULTS"
+              ? "No results"
+              : e.code === "NO_IMAGE"
+              ? "Could not load image."
+              : e.message
+          );
         }
       }
 
