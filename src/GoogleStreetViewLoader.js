@@ -1,5 +1,5 @@
 import { Loader } from "./Loader.js";
-import { getPanoramaById } from "./utils.js";
+import { getPanoramaById, decodePanoId } from "./utils.js";
 import { PanomNomError, ErrorCodes } from "./errors.js";
 
 // Street View serves panoramas on one of two tile grids. Both are fixed
@@ -49,9 +49,32 @@ class GoogleStreetViewLoader extends Loader {
     const w = grid.levels[zoom];
     const h = Math.ceil(w / aspectRatio);
 
+    // getPanorama can return imagery that isn't Street View at all — a photo
+    // sphere, for instance, whose tiles are served from somewhere else
+    // entirely. The Maps API knows where each panorama's tiles live, so prefer
+    // asking it over hardcoding a host.
+    const getTileUrl =
+      typeof metadata.tiles?.getTileUrl === "function"
+        ? (x, y) => metadata.tiles.getTileUrl(id, zoom, x, y)
+        : null;
+
+    if (!getTileUrl) {
+      const wrapped = decodePanoId(id);
+      if (wrapped && wrapped.kind !== "street-view") {
+        throw new PanomNomError(
+          ErrorCodes.BAD_METADATA,
+          `"${id}" is a ${wrapped.kind} (${wrapped.id}), not a Street View panorama. ` +
+            `Its tiles are not served from the Street View endpoint — use ` +
+            `GooglePhotoSphereLoader.loadFromURL with its Maps URL instead.`
+        );
+      }
+    }
+
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        const url = `https://geo0.ggpht.com/cbk?cb_client=maps_sv.tactile&authuser=0&hl=en&panoid=${id}&output=tile&x=${x}&y=${y}&zoom=${zoom}&nbt&fover=2`;
+        const url = getTileUrl
+          ? getTileUrl(x, y)
+          : `https://geo0.ggpht.com/cbk?cb_client=maps_sv.tactile&authuser=0&hl=en&panoid=${id}&output=tile&x=${x}&y=${y}&zoom=${zoom}&nbt&fover=2`;
 
         this.stitcher.addTileTask({
           url,

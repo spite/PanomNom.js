@@ -63,7 +63,15 @@ await loader.load(id, 2);
 
 Once the panorama is loaded, `loader.canvas` has the resulting stitched image. A loader can be reused: each `load` clears the canvas and starts a fresh run.
 
-**Note: getIdByLocation will only return ids valid for Street View panoramas**
+**Note: `getIdByLocation` does not only return Street View panoramas.** It can return a photo sphere, in which case the id is a base64 protobuf wrapping the real one and the tiles are served from a different host entirely. `GoogleStreetViewLoader` uses the tile URL the Maps API reports, so this usually just works; where it can't, it says so rather than silently fetching nothing. `decodePanoId` will tell you what an id actually refers to:
+
+```javascript
+import { decodePanoId } from "./PanomNom.module.js";
+
+decodePanoId("CAoSF0NJSE0wb2dLRUlDQWdJREU4YjdNMndF");
+// { kind: "photo-sphere", id: "CIHM0ogKEICAgIDE8b7M2wE" }
+decodePanoId("kCisB_W6mNaYBgdxg0AX8A"); // null - a plain id
+```
 
 You can use `loader.onProgress` to track loading progress:
 

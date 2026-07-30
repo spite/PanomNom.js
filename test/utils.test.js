@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { getIdFromURL, parsePanoURL } from "../src/utils.js";
+import { getIdFromURL, parsePanoURL, decodePanoId } from "../src/utils.js";
 import { ErrorCodes } from "../src/errors.js";
 
 const PANO = "kCisB_W6mNaYBgdxg0AX8A";
@@ -111,4 +111,27 @@ test("pano id wins even when the place block comes first", () => {
 
   assert.equal(parsePanoURL(reordered).id, "CIHM0ogKEICAgICE_fG1swE");
   assert.equal(getIdFromURL(reordered), "CIHM0ogKEICAgICE_fG1swE");
+});
+
+// --- decodePanoId ----------------------------------------------------------
+
+test("decodePanoId unwraps a protobuf-wrapped photo sphere id", () => {
+  // Returned by getIdByLocation, which does not only yield Street View panos.
+  assert.deepEqual(decodePanoId("CAoSF0NJSE0wb2dLRUlDQWdJREU4YjdNMndF"), {
+    kind: "photo-sphere",
+    id: "CIHM0ogKEICAgIDE8b7M2wE",
+  });
+});
+
+test("decodePanoId returns null for ordinary ids", () => {
+  // These must not be mistaken for wrappers, or every load would misreport.
+  for (const id of [
+    PANO,
+    "CIHM0ogKEICAgIDq8-jQcQ",
+    "AF1QipMKVZBKb5dP2my1FWB2ljCp2vXqiISTzj056YD_",
+    "4avA1iH-YV3U2s2rK12tqA",
+    "not a valid id at all",
+  ]) {
+    assert.equal(decodePanoId(id), null, id);
+  }
 });

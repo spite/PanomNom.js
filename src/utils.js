@@ -80,6 +80,39 @@ function getQueryVariable(url, variable) {
 // Entity kinds used in the "!2e<kind>" token of a Maps data URL.
 const ENTITY_KINDS = { 0: "street-view", 10: "photo-sphere" };
 
+// getPanorama() can hand back an id that is not a bare panorama id but a
+// base64 protobuf wrapping one, e.g.
+//
+//   CAoSF0NJSE0wb2dLRUlDQWdJREU4YjdNMndF
+//     -> field 1 (varint) = 10        entity kind, matching !2e10
+//        field 2 (string) = CIHM0o... the actual id
+//
+// Feeding the wrapper to a tile endpoint fails, so unwrap it to find out what
+// the id actually refers to.
+function decodePanoId(id) {
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) return null;
+
+  let bytes;
+  try {
+    const b64 = id.replace(/-/g, "+").replace(/_/g, "/");
+    const binary = atob(b64.padEnd(Math.ceil(b64.length / 4) * 4, "="));
+    bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
+
+  // 08 <kind> 12 <len> <id bytes>
+  if (bytes[0] !== 0x08 || bytes[2] !== 0x12) return null;
+  const kind = bytes[1];
+  const length = bytes[3];
+  if (bytes.length < 4 + length) return null;
+
+  const inner = String.fromCharCode(...bytes.slice(4, 4 + length));
+  if (!/^[A-Za-z0-9_-]+$/.test(inner)) return null;
+
+  return { kind: ENTITY_KINDS[kind] ?? null, id: inner };
+}
+
 // A /maps/place/ URL carries two !1s tokens: the panorama id, and the place's
 // feature id (e.g. "0x12a49816718e30e5:0x44b0fb3d4f47660a"). Only the panorama
 // is immediately followed by !2e<kind>, so prefer that pairing rather than
@@ -148,4 +181,5 @@ export {
   getIdByLocation,
   getIdFromURL,
   parsePanoURL,
+  decodePanoId,
 };

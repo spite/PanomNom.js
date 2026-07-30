@@ -199,6 +199,24 @@ function getQueryVariable(url, variable) {
   return null;
 }
 var ENTITY_KINDS = { 0: "street-view", 10: "photo-sphere" };
+function decodePanoId(id) {
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) return null;
+  let bytes;
+  try {
+    const b64 = id.replace(/-/g, "+").replace(/_/g, "/");
+    const binary = atob(b64.padEnd(Math.ceil(b64.length / 4) * 4, "="));
+    bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
+  if (bytes[0] !== 8 || bytes[2] !== 18) return null;
+  const kind = bytes[1];
+  const length = bytes[3];
+  if (bytes.length < 4 + length) return null;
+  const inner = String.fromCharCode(...bytes.slice(4, 4 + length));
+  if (!/^[A-Za-z0-9_-]+$/.test(inner)) return null;
+  return { kind: ENTITY_KINDS[kind] ?? null, id: inner };
+}
 function findPanoToken(decoded) {
   const withKind = decoded.match(/!1s([^!]+)!2e(\d+)/);
   if (withKind) return { id: withKind[1], kind: withKind[2] };
@@ -268,9 +286,19 @@ var GoogleStreetViewLoader = class extends Loader {
     this.canvas.height = Math.round(this.canvas.width / aspectRatio);
     const w = grid.levels[zoom];
     const h = Math.ceil(w / aspectRatio);
+    const getTileUrl = typeof metadata.tiles?.getTileUrl === "function" ? (x, y) => metadata.tiles.getTileUrl(id, zoom, x, y) : null;
+    if (!getTileUrl) {
+      const wrapped = decodePanoId(id);
+      if (wrapped && wrapped.kind !== "street-view") {
+        throw new PanomNomError(
+          ErrorCodes.BAD_METADATA,
+          `"${id}" is a ${wrapped.kind} (${wrapped.id}), not a Street View panorama. Its tiles are not served from the Street View endpoint \u2014 use GooglePhotoSphereLoader.loadFromURL with its Maps URL instead.`
+        );
+      }
+    }
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        const url = `https://geo0.ggpht.com/cbk?cb_client=maps_sv.tactile&authuser=0&hl=en&panoid=${id}&output=tile&x=${x}&y=${y}&zoom=${zoom}&nbt&fover=2`;
+        const url = getTileUrl ? getTileUrl(x, y) : `https://geo0.ggpht.com/cbk?cb_client=maps_sv.tactile&authuser=0&hl=en&panoid=${id}&output=tile&x=${x}&y=${y}&zoom=${zoom}&nbt&fover=2`;
         this.stitcher.addTileTask({
           url,
           x: x * tileSize.width,
