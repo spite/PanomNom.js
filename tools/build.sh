@@ -1,6 +1,14 @@
 #!/bin/bash
+set -euo pipefail
 
-esbuild ../src/PanomNom.js --bundle --format=iife --outfile=../build/PanomNom.js
-esbuild ../src/PanomNom.js --bundle --minify --format=iife --outfile=../build/PanomNom.min.js
-esbuild ../src/PanomNom.js --bundle --format=esm --outfile=../build/PanomNom.module.js
-esbuild ../src/PanomNom.js --bundle --minify --format=esm --outfile=../build/PanomNom.module.min.js
+# Run from the repo root regardless of where this is invoked from.
+cd "$(dirname "$0")/.."
+
+ESBUILD="npx --no-install esbuild"
+
+# The IIFE builds need --global-name, otherwise the bundle evaluates and
+# exposes nothing to the page.
+$ESBUILD src/PanomNom.js --bundle --format=iife --global-name=PANOMNOM --outfile=build/PanomNom.js
+$ESBUILD src/PanomNom.js --bundle --minify --format=iife --global-name=PANOMNOM --outfile=build/PanomNom.min.js
+$ESBUILD src/PanomNom.js --bundle --format=esm --outfile=build/PanomNom.module.js
+$ESBUILD src/PanomNom.js --bundle --minify --format=esm --outfile=build/PanomNom.module.min.js

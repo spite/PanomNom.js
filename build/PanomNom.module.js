@@ -1,4 +1,56 @@
-// ../src/Stitcher.js
+// src/errors.js
+var ErrorCodes = {
+  NO_PANO_ID: "NO_PANO_ID",
+  NO_IMAGE: "NO_IMAGE",
+  ZERO_RESULTS: "ZERO_RESULTS",
+  BAD_METADATA: "BAD_METADATA",
+  INVALID_ZOOM: "INVALID_ZOOM"
+};
+var PanomNomError = class extends Error {
+  constructor(code, message, options) {
+    super(message, options);
+    this.name = "PanomNomError";
+    this.code = code;
+  }
+};
+
+// src/Stitcher.js
+var MAX_CONCURRENT = 50;
+function loadTile(task, run) {
+  return new Promise((resolve, reject) => {
+    if (run.cancelled) {
+      reject(run.reason);
+      return;
+    }
+    const img = new Image();
+    img.decoding = "async";
+    img.crossOrigin = "anonymous";
+    const cleanup = () => {
+      img.removeEventListener("load", onLoad);
+      img.removeEventListener("error", onError);
+      run.inflight.delete(cancel);
+    };
+    const onLoad = () => {
+      cleanup();
+      resolve(img);
+    };
+    const onError = () => {
+      cleanup();
+      reject(
+        new PanomNomError(ErrorCodes.NO_IMAGE, `Could not load tile ${task.url}`)
+      );
+    };
+    const cancel = () => {
+      cleanup();
+      img.src = "";
+      reject(run.reason);
+    };
+    img.addEventListener("load", onLoad);
+    img.addEventListener("error", onError);
+    run.inflight.add(cancel);
+    img.src = task.url;
+  });
+}
 var Stitcher = class {
   constructor(canvas) {
     this.canvas = canvas;
@@ -9,240 +61,485 @@ var Stitcher = class {
     this.onProgress = null;
   }
   reset() {
+    this.queue.length = 0;
     this.toLoad = 0;
     this.loaded = 0;
   }
   addTileTask(task) {
     this.queue.push(task);
-    this.toLoad++;
   }
   updateProgress() {
-    const p = this.loaded * 100 / this.toLoad;
-    if (this.onProgress) {
-      this.onProgress(p);
-    }
+    if (!this.onProgress) return;
+    this.onProgress(this.toLoad === 0 ? 100 : this.loaded * 100 / this.toLoad);
   }
-  processQueue() {
-    this.updateProgress();
-    if (this.loaded === this.toLoad) {
-      if (this.resolve) {
-        this.resolve(true);
-        this.resolve = null;
-      }
-      return;
-    }
-    if (this.queue.length === 0) {
-      return;
-    }
-    const task = this.queue.shift();
-    let img = new Image();
-    img.decoding = "async";
-    img.addEventListener("load", () => {
-      this.loaded++;
-      this.ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, task.x, task.y, 512, 512);
-      this.processQueue();
-      img = null;
-    });
-    img.addEventListener("error", (e) => {
-      this.reject("NO_IMAGE");
-      img = null;
-    });
-    img.crossOrigin = "";
-    img.src = task.url;
-  }
+  // Consumes the queued tasks and draws them onto the canvas. Always starts
+  // from a clean slate, so a Stitcher can be reused across loads.
   async process() {
-    this.toLoad = this.queue.length;
-    this.loaded = 0;
-    return new Promise((resolve, reject) => {
-      this.resolve = resolve;
-      this.reject = reject;
-      const concurrent = Math.min(this.queue.length, 50);
-      for (let i = 0; i < concurrent; i++) {
-        this.processQueue();
+    const tasks = this.queue.slice();
+    this.reset();
+    this.toLoad = tasks.length;
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    this.updateProgress();
+    if (tasks.length === 0) {
+      return true;
+    }
+    const run = { cancelled: false, reason: null, inflight: /* @__PURE__ */ new Set() };
+    let next = 0;
+    const worker = async () => {
+      while (next < tasks.length && !run.cancelled) {
+        const task = tasks[next++];
+        const img = await loadTile(task, run);
+        this.ctx.drawImage(
+          img,
+          0,
+          0,
+          img.naturalWidth,
+          img.naturalHeight,
+          task.x,
+          task.y,
+          task.w,
+          task.h
+        );
+        this.loaded++;
+        this.updateProgress();
       }
-    });
+    };
+    const workers = [];
+    for (let i = 0; i < Math.min(tasks.length, MAX_CONCURRENT); i++) {
+      workers.push(worker());
+    }
+    try {
+      await Promise.all(workers);
+    } catch (e) {
+      run.cancelled = true;
+      run.reason = e;
+      for (const cancel of [...run.inflight]) cancel();
+      await Promise.allSettled(workers);
+      throw e;
+    }
+    return true;
   }
 };
 
-// ../src/Loader.js
+// src/Loader.js
 var Loader = class {
   constructor() {
     this.canvas = document.createElement("canvas");
-    this.ctx = this.canvas.getContext("2d");
     this.stitcher = new Stitcher(this.canvas);
   }
   async load() {
+    throw new Error(`${this.constructor.name} does not implement load()`);
   }
   onProgress(cb) {
     this.stitcher.onProgress = cb;
   }
 };
 
-// ../src/utils.js
+// src/utils.js
 var GoogleStreetViewService;
+var GoogleGeoCoder;
 function getGoogleStreetViewService() {
-  if (GoogleStreetViewService)
-    return GoogleStreetViewService;
+  if (GoogleStreetViewService) return GoogleStreetViewService;
   GoogleStreetViewService = new google.maps.StreetViewService();
   return GoogleStreetViewService;
 }
+function getGoogleGeoCoder() {
+  if (GoogleGeoCoder) return GoogleGeoCoder;
+  GoogleGeoCoder = new google.maps.Geocoder();
+  return GoogleGeoCoder;
+}
+async function resolveAddress(address) {
+  const geocoder = getGoogleGeoCoder();
+  try {
+    const { results } = await geocoder.geocode({ address });
+    return results[0].geometry.location;
+  } catch (e) {
+    throw new PanomNomError(
+      ErrorCodes.ZERO_RESULTS,
+      `Geocode was not successful for "${address}"`,
+      { cause: e }
+    );
+  }
+}
 async function getPanoramaById(id) {
   const service = getGoogleStreetViewService();
-  return new Promise((resolve, reject) => {
-    service.getPanorama({pano: id}, (data, status) => {
-      if (data) {
-        resolve(data);
-      } else {
-        reject(status);
-      }
-    });
-  });
+  try {
+    const { data } = await service.getPanorama({ pano: id });
+    return data;
+  } catch (e) {
+    throw new PanomNomError(
+      ErrorCodes.ZERO_RESULTS,
+      `No panorama found for id "${id}"`,
+      { cause: e }
+    );
+  }
 }
 async function getIdByLocation(lat, lon) {
   const service = getGoogleStreetViewService();
   const latLng = new google.maps.LatLng(lat, lon);
   try {
-    const res = await service.getPanorama({
+    return await service.getPanorama({
       location: latLng,
       radius: 50,
       source: "outdoor"
     });
-    return res;
   } catch (e) {
-    throw e;
+    throw new PanomNomError(
+      ErrorCodes.ZERO_RESULTS,
+      `No panorama found near ${lat},${lon}`,
+      { cause: e }
+    );
   }
 }
-function getQueryVariable(query, variable) {
-  const parts = query.split("?");
-  const params = new URLSearchParams(parts[1]);
-  return params.get(variable);
+function getQueryVariable(url, variable) {
+  for (const segment of url.split("?").slice(1)) {
+    const value = new URLSearchParams(segment).get(variable);
+    if (value) return value;
+  }
+  return null;
+}
+var ENTITY_KINDS = { 0: "street-view", 10: "photo-sphere" };
+function findPanoToken(decoded) {
+  const withKind = decoded.match(/!1s([^!]+)!2e(\d+)/);
+  if (withKind) return { id: withKind[1], kind: withKind[2] };
+  const bare = decoded.match(/!1s([^!]+)/);
+  return bare ? { id: bare[1], kind: null } : null;
+}
+function parsePanoURL(url) {
+  const decoded = decodeURIComponent(url);
+  const token = findPanoToken(decoded);
+  if (!token) {
+    throw new PanomNomError(
+      ErrorCodes.NO_PANO_ID,
+      `Can't find panorama id in specified URL`
+    );
+  }
+  const tileBase = decoded.match(/!6s(https?:\/\/[^!]+)/)?.[1]?.split("=")[0];
+  return {
+    id: token.id,
+    kind: ENTITY_KINDS[token.kind] ?? null,
+    tileBase: tileBase ?? null
+  };
 }
 function getIdFromURL(url) {
-  url = decodeURIComponent(url);
-  if (url.indexOf("panoid") != -1) {
-    const panoId = getQueryVariable(url, "panoid");
-    return panoId;
-  } else if (url.indexOf("!1s") != -1) {
-    const pos = url.indexOf("!1s") + 3;
-    const npos = url.substr(pos).indexOf("!");
-    const panoId = url.substr(pos, npos);
-    return panoId;
-  } else {
-    throw new Error(`Can't find panorama id in specified URL`);
-  }
+  const decoded = decodeURIComponent(url);
+  const fromQuery = getQueryVariable(decoded, "panoid");
+  if (fromQuery) return fromQuery;
+  const token = findPanoToken(decoded);
+  if (token?.id) return token.id;
+  throw new PanomNomError(
+    ErrorCodes.NO_PANO_ID,
+    `Can't find panorama id in specified URL`
+  );
 }
 
-// ../src/GoogleStreetViewLoader.js
+// src/GoogleStreetViewLoader.js
+var GRID_32 = {
+  levels: [1, 2, 4, 8, 16, 32],
+  widths: [512, 1024, 2048, 4096, 8192, 16384]
+};
+var GRID_26 = {
+  levels: [1, 2, 4, 7, 13, 26],
+  widths: [416, 832, 1664, 3328, 6656, 13312]
+};
 var GoogleStreetViewLoader = class extends Loader {
   constructor() {
     super();
-    this.service = getGoogleStreetViewService();
     this.zoom = 1;
     this.metadata = {};
   }
+  // zoom is an index into the tile pyramid: 0 is a single tile, 5 is full
+  // resolution.
   async load(id, zoom = 1) {
-    this.zoom = zoom;
-    this.panoId = id;
     const metadata = await getPanoramaById(id);
     this.metadata = metadata;
-    const aspectRatio = this.metadata.tiles.worldSize.width / this.metadata.tiles.worldSize.height;
-    let widths;
-    let levels;
-    if (this.metadata.tiles.worldSize.width / 512 === 32) {
-      levels = [1, 2, 4, 8, 16, 32];
-      widths = [512, 1024, 2048, 4096, 8192, 16384];
-    } else {
-      levels = [1, 2, 4, 7, 13, 26];
-      widths = [416, 832, 1664, 3328, 6656, 13312];
+    this.panoId = id;
+    const { worldSize, tileSize } = metadata.tiles;
+    const grid = worldSize.width / 512 === 32 ? GRID_32 : GRID_26;
+    if (!Number.isInteger(zoom) || zoom < 0 || zoom >= grid.widths.length) {
+      throw new PanomNomError(
+        ErrorCodes.INVALID_ZOOM,
+        `Zoom must be an integer between 0 and ${grid.widths.length - 1}, got ${zoom}`
+      );
     }
-    this.canvas.width = widths[zoom];
-    this.canvas.height = this.canvas.width / aspectRatio;
-    const tileWidth = this.metadata.tiles.tileSize.width;
-    const tileHeight = this.metadata.tiles.tileSize.height;
-    const w = levels[zoom];
-    const h = w / aspectRatio;
+    this.zoom = zoom;
+    const aspectRatio = worldSize.width / worldSize.height;
+    this.canvas.width = grid.widths[zoom];
+    this.canvas.height = Math.round(this.canvas.width / aspectRatio);
+    const w = grid.levels[zoom];
+    const h = Math.ceil(w / aspectRatio);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const url = `https://geo0.ggpht.com/cbk?cb_client=maps_sv.tactile&authuser=0&hl=en&panoid=${id}&output=tile&x=${x}&y=${y}&zoom=${zoom}&nbt&fover=2`;
         this.stitcher.addTileTask({
           url,
-          x: x * tileWidth,
-          y: y * tileHeight
+          x: x * tileSize.width,
+          y: y * tileSize.height,
+          w: tileSize.width,
+          h: tileSize.height
         });
       }
     }
-    const res = await this.stitcher.process();
-    return res;
+    return this.stitcher.process();
   }
 };
 
-// ../src/GooglePhotoSphereLoader.js
-async function getPhotoSphereInfo(id) {
-  const url = `https://www.google.com/maps/photometa/v1?authuser=0&hl=en&gl=uk&pb=!1m4!1smaps_sv.tactile!11m2!2m1!1b1!2m2!1sen!2suk!3m3!1m2!1e10!2s${id}!4m57!1e1!1e2!1e3!1e4!1e5!1e6!1e8!1e12!2m1!1e1!4m1!1i48!5m1!1e1!5m1!1e2!6m1!1e1!6m1!1e2!9m36!1m3!1e2!2b1!3e2!1m3!1e2!2b0!3e3!1m3!1e3!2b1!3e2!1m3!1e3!2b0!3e3!1m3!1e8!2b0!3e3!1m3!1e1!2b0!3e3!1m3!1e4!2b0!3e3!1m3!1e10!2b1!3e2!1m3!1e10!2b0!3e3`;
-  const res = await fetch(url);
+// src/photometa.js
+var ENTITY_STREET_VIEW = 2;
+var ENTITY_PHOTO_SPHERE = 10;
+function photometaURL(id, kind) {
+  return `https://www.google.com/maps/photometa/v1?authuser=0&hl=en&gl=uk&pb=!1m4!1smaps_sv.tactile!11m2!2m1!1b1!2m2!1sen!2suk!3m3!1m2!1e${kind}!2s${id}!4m57!1e1!1e2!1e3!1e4!1e5!1e6!1e8!1e12!2m1!1e1!4m1!1i48!5m1!1e1!5m1!1e2!6m1!1e1!6m1!1e2!9m36!1m3!1e2!2b1!3e2!1m3!1e2!2b0!3e3!1m3!1e3!2b1!3e2!1m3!1e3!2b0!3e3!1m3!1e8!2b0!3e3!1m3!1e1!2b0!3e3!1m3!1e4!2b0!3e3!1m3!1e10!2b1!3e2!1m3!1e10!2b0!3e3`;
+}
+async function fetchPhotometa(id, kind) {
+  const res = await fetch(photometaURL(id, kind));
+  if (!res.ok) {
+    throw new PanomNomError(
+      ErrorCodes.BAD_METADATA,
+      `photometa request for "${id}" failed with ${res.status}`
+    );
+  }
   const text = await res.text();
-  const info = JSON.parse(text.substr(4));
-  return info;
+  try {
+    return JSON.parse(text.slice(4));
+  } catch (e) {
+    throw new PanomNomError(
+      ErrorCodes.BAD_METADATA,
+      `Could not parse photometa response for "${id}"`,
+      { cause: e }
+    );
+  }
+}
+function pick(root, path, id) {
+  let node = root;
+  for (let i = 0; i < path.length; i++) {
+    if (node === null || node === void 0) {
+      throw new PanomNomError(
+        ErrorCodes.BAD_METADATA,
+        `Unexpected photometa shape for "${id}": no value at [${path.slice(0, i).join("][")}]`
+      );
+    }
+    node = node[path[i]];
+  }
+  if (node === null || node === void 0) {
+    throw new PanomNomError(
+      ErrorCodes.BAD_METADATA,
+      `Unexpected photometa shape for "${id}": no value at [${path.join("][")}]`
+    );
+  }
+  return node;
+}
+function tryPick(root, path) {
+  let node = root;
+  for (const key of path) {
+    if (node === null || node === void 0) return void 0;
+    node = node[key];
+  }
+  return node ?? void 0;
+}
+function extractAttribution(info) {
+  return {
+    copyright: tryPick(info, [1, 0, 4, 0, 0, 0, 0]),
+    author: tryPick(info, [1, 0, 4, 1, 0, 0, 0]),
+    authorURL: tryPick(info, [1, 0, 4, 1, 0, 1])
+  };
+}
+
+// src/GooglePhotoSphereLoader.js
+async function getPhotoSphereInfo(id) {
+  return fetchPhotometa(id, ENTITY_PHOTO_SPHERE);
 }
 var GooglePhotoSphereLoader = class extends Loader {
   constructor() {
     super();
-    this.service = getGoogleStreetViewService();
     this.zoom = 1;
     this.metadata = {};
   }
-  async load(id, zoom) {
-    if (zoom === void 0) {
-      console.warn("No zoom provided, assuming 1");
-      zoom = 1;
-    }
-    this.zoom = zoom;
+  // Newer photo spheres are served from an opaque media id that only appears in
+  // the Maps URL, so this resolves both parts and hands them to load().
+  async loadFromURL(url, zoom = 1) {
+    const { id, tileBase } = parsePanoURL(url);
+    return this.load(id, zoom, { tileBase });
+  }
+  // `tileBase` overrides the tile endpoint for panoramas that aren't served
+  // from lh3.ggpht.com/p/<id>. See parsePanoURL.
+  async load(id, zoom = 1, { tileBase = null } = {}) {
+    const info = await getPhotoSphereInfo(id);
     this.panoId = id;
-    const metadata = await getPhotoSphereInfo(id);
+    const size = pick(info, [1, 0, 2, 2], id);
+    const tile = pick(info, [1, 0, 2, 3, 1], id);
+    const pyramid = pick(info, [1, 0, 2, 3, 0], id);
     this.metadata = {
       tiles: {
-        worldSize: {
-          width: metadata[1][0][2][2][1],
-          height: metadata[1][0][2][2][0]
-        },
-        tileSize: {
-          width: metadata[1][0][2][3][1][1],
-          height: metadata[1][0][2][3][1][0]
-        }
-      }
+        worldSize: { width: size[1], height: size[0] },
+        tileSize: { width: tile[1], height: tile[0] }
+      },
+      ...extractAttribution(info)
     };
-    const aspectRatio = this.metadata.tiles.worldSize.width / this.metadata.tiles.worldSize.height;
-    const widths = [];
     const levels = [];
-    let level = 1;
-    for (const w2 of metadata[1][0][2][3][0]) {
-      widths.push(w2[0][1]);
-      levels.push(level);
-      level *= 2;
+    for (let i = 0; i < pyramid.length; i++) {
+      levels.push({
+        height: pick(info, [1, 0, 2, 3, 0, i, 0, 0], id),
+        width: pick(info, [1, 0, 2, 3, 0, i, 0, 1], id)
+      });
     }
-    this.canvas.width = widths[zoom];
-    this.canvas.height = this.canvas.width / aspectRatio;
-    const tileWidth = this.metadata.tiles.tileSize.width;
-    const tileHeight = this.metadata.tiles.tileSize.height;
-    const w = levels[zoom];
-    const h = w / aspectRatio;
+    if (!Number.isInteger(zoom) || zoom < 0 || zoom >= levels.length) {
+      throw new PanomNomError(
+        ErrorCodes.INVALID_ZOOM,
+        `Zoom must be an integer between 0 and ${levels.length - 1} for photo sphere "${id}", got ${zoom}`
+      );
+    }
+    this.zoom = zoom;
+    const { tileSize } = this.metadata.tiles;
+    const level = levels[zoom];
+    this.canvas.width = level.width;
+    this.canvas.height = level.height;
+    const w = Math.ceil(level.width / tileSize.width);
+    const h = Math.ceil(level.height / tileSize.height);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        const url = `https://lh3.ggpht.com/p/${id}=x${x}-y${y}-z${zoom}`;
         this.stitcher.addTileTask({
-          url,
-          x: x * tileWidth,
-          y: y * tileHeight
+          url: tileBase ? `${tileBase}=x${x}-y${y}-z${zoom}` : `https://lh3.ggpht.com/p/${id}=x${x}-y${y}-z${zoom}`,
+          x: x * tileSize.width,
+          y: y * tileSize.height,
+          w: tileSize.width,
+          h: tileSize.height
         });
       }
     }
-    const res = await this.stitcher.process();
-    return res;
+    return this.stitcher.process();
   }
 };
+
+// src/GoogleStreetViewDepthLoader.js
+var NO_PLANE = Infinity;
+function parseHeader(view) {
+  return {
+    headerSize: view.getUint8(0),
+    numberOfPlanes: view.getUint16(1, true),
+    width: view.getUint16(3, true),
+    height: view.getUint16(5, true),
+    offset: view.getUint16(7, true)
+  };
+}
+function parsePlanes(header, view) {
+  const indices = [];
+  for (let i = 0; i < header.width * header.height; ++i) {
+    indices.push(view.getUint8(header.offset + i));
+  }
+  const planes = [];
+  for (let i = 0; i < header.numberOfPlanes; ++i) {
+    const byteOffset = header.offset + header.width * header.height + i * 4 * 4;
+    planes.push({
+      n: [
+        view.getFloat32(byteOffset, true),
+        view.getFloat32(byteOffset + 4, true),
+        view.getFloat32(byteOffset + 8, true)
+      ],
+      d: view.getFloat32(byteOffset + 12, true)
+    });
+  }
+  return { planes, indices };
+}
+function computeDepthMap(header, indices, planes) {
+  const w = header.width;
+  const h = header.height;
+  const depthMap = new Float32Array(w * h);
+  const sin_theta = new Float32Array(h);
+  const cos_theta = new Float32Array(h);
+  const sin_phi = new Float32Array(w);
+  const cos_phi = new Float32Array(w);
+  for (let y = 0; y < h; ++y) {
+    const theta = (h - y - 0.5) / h * Math.PI;
+    sin_theta[y] = Math.sin(theta);
+    cos_theta[y] = Math.cos(theta);
+  }
+  for (let x = 0; x < w; ++x) {
+    const phi = (w - x - 0.5) / w * 2 * Math.PI + Math.PI / 2;
+    sin_phi[x] = Math.sin(phi);
+    cos_phi[x] = Math.cos(phi);
+  }
+  const v = [0, 0, 0];
+  for (let y = 0; y < h; ++y) {
+    for (let x = 0; x < w; ++x) {
+      const planeIdx = indices[y * w + x];
+      v[0] = sin_theta[y] * cos_phi[x];
+      v[1] = sin_theta[y] * sin_phi[x];
+      v[2] = cos_theta[y];
+      if (planeIdx > 0) {
+        const plane = planes[planeIdx];
+        depthMap[y * w + (w - x - 1)] = Math.abs(
+          plane.d / (v[0] * plane.n[0] + v[1] * plane.n[1] + v[2] * plane.n[2])
+        );
+      } else {
+        depthMap[y * w + (w - x - 1)] = NO_PLANE;
+      }
+    }
+  }
+  return { width: w, height: h, depthMap };
+}
+var GoogleStreetViewDepthLoader = class {
+  // Set `fallbackToEmpty` to receive an all-sky depth map instead of an error
+  // when a panorama has no depth data.
+  constructor({ fallbackToEmpty = false } = {}) {
+    this.fallbackToEmpty = fallbackToEmpty;
+    this.depthMap = null;
+  }
+  async load(panoId) {
+    const json = await fetchPhotometa(panoId, ENTITY_STREET_VIEW);
+    try {
+      const raw = pick(json, [1, 0, 5, 0, 5, 1, 2], panoId);
+      this.depthMap = this.parse(this.decode(raw));
+    } catch (e) {
+      if (!this.fallbackToEmpty) {
+        throw e instanceof PanomNomError ? e : new PanomNomError(
+          ErrorCodes.BAD_METADATA,
+          `Could not decode depth map for "${panoId}"`,
+          { cause: e }
+        );
+      }
+      this.depthMap = createEmptyDepthMap();
+    }
+    return this.depthMap;
+  }
+  decode(rawDepthMap) {
+    let data = rawDepthMap;
+    while (data.length % 4 != 0) data += "=";
+    data = data.replace(/-/g, "+").replace(/_/g, "/");
+    const decoded = atob(data);
+    const depthMap = new Uint8Array(decoded.length);
+    for (let i = 0; i < decoded.length; ++i) depthMap[i] = decoded.charCodeAt(i);
+    return depthMap;
+  }
+  parse(bytes) {
+    const view = new DataView(bytes.buffer);
+    const header = parseHeader(view);
+    const required = header.offset + header.width * header.height + header.numberOfPlanes * 16;
+    if (bytes.length < required) {
+      throw new PanomNomError(
+        ErrorCodes.BAD_METADATA,
+        `Depth map truncated: header needs ${required} bytes, got ${bytes.length}`
+      );
+    }
+    const { planes, indices } = parsePlanes(header, view);
+    return computeDepthMap(header, indices, planes);
+  }
+};
+function createEmptyDepthMap(width = 512, height = 256) {
+  const depthMap = new Float32Array(width * height);
+  depthMap.fill(NO_PLANE);
+  return { width, height, depthMap };
+}
 export {
+  ErrorCodes,
   GooglePhotoSphereLoader,
+  GoogleStreetViewDepthLoader,
   GoogleStreetViewLoader,
+  NO_PLANE,
+  PanomNomError,
+  createEmptyDepthMap,
   getIdByLocation,
-  getIdFromURL
+  getIdFromURL,
+  getPanoramaById,
+  parsePanoURL,
+  resolveAddress
 };
