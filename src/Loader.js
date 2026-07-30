@@ -1,9 +1,12 @@
 import { Stitcher } from "./Stitcher.js";
 
 class Loader {
-  constructor() {
+  // Options are forwarded to the Stitcher; `concurrency` caps how many tiles
+  // are fetched at once, which is the setting that matters if Google starts
+  // returning 429.
+  constructor(options = {}) {
     this.canvas = document.createElement("canvas");
-    this.stitcher = new Stitcher(this.canvas);
+    this.stitcher = new Stitcher(this.canvas, options);
   }
 
   async load() {

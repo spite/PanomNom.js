@@ -51,10 +51,13 @@ var PANOMNOM = (() => {
   };
 
   // src/Stitcher.js
-  var MAX_CONCURRENT = 50;
+  var MAX_CONCURRENT = 6;
   var MAX_ATTEMPTS = 3;
-  var RETRY_DELAY = 250;
+  var RETRY_BASE_DELAY = 600;
   var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  function retryDelay(attempt) {
+    return RETRY_BASE_DELAY * 2 ** (attempt - 1) * (0.5 + Math.random());
+  }
   function loadTile(task, run) {
     return new Promise((resolve, reject) => {
       if (run.cancelled) {
@@ -91,7 +94,10 @@ var PANOMNOM = (() => {
     });
   }
   var Stitcher = class {
-    constructor(canvas) {
+    // `concurrency` is worth lowering further if you are loading several
+    // panoramas in a row and seeing 429s.
+    constructor(canvas, { concurrency = MAX_CONCURRENT } = {}) {
+      this.concurrency = concurrency;
       this.canvas = canvas;
       this.ctx = this.canvas.getContext("2d");
       this.queue = [];
@@ -133,7 +139,7 @@ var PANOMNOM = (() => {
           } catch (e) {
             if (run.cancelled || attempt >= MAX_ATTEMPTS) throw e;
             this.retries++;
-            await sleep(RETRY_DELAY * attempt);
+            await sleep(retryDelay(attempt));
           }
         }
       };
@@ -157,7 +163,7 @@ var PANOMNOM = (() => {
         }
       };
       const workers = [];
-      for (let i = 0; i < Math.min(tasks.length, MAX_CONCURRENT); i++) {
+      for (let i = 0; i < Math.min(tasks.length, this.concurrency); i++) {
         workers.push(worker());
       }
       try {
@@ -175,9 +181,12 @@ var PANOMNOM = (() => {
 
   // src/Loader.js
   var Loader = class {
-    constructor() {
+    // Options are forwarded to the Stitcher; `concurrency` caps how many tiles
+    // are fetched at once, which is the setting that matters if Google starts
+    // returning 429.
+    constructor(options = {}) {
       this.canvas = document.createElement("canvas");
-      this.stitcher = new Stitcher(this.canvas);
+      this.stitcher = new Stitcher(this.canvas, options);
     }
     async load() {
       throw new Error(`${this.constructor.name} does not implement load()`);
@@ -313,8 +322,8 @@ var PANOMNOM = (() => {
     widths: [416, 832, 1664, 3328, 6656, 13312]
   };
   var GoogleStreetViewLoader = class extends Loader {
-    constructor() {
-      super();
+    constructor(options = {}) {
+      super(options);
       this.zoom = 1;
       this.metadata = {};
     }
@@ -429,8 +438,8 @@ var PANOMNOM = (() => {
     return fetchPhotometa(id, ENTITY_PHOTO_SPHERE);
   }
   var GooglePhotoSphereLoader = class extends Loader {
-    constructor() {
-      super();
+    constructor(options = {}) {
+      super(options);
       this.zoom = 1;
       this.metadata = {};
     }

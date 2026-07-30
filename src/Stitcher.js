@@ -1,20 +1,33 @@
 import { PanomNomError, ErrorCodes } from "./errors.js";
 
-const MAX_CONCURRENT = 50;
+// Google rate-limits the tile hosts per client, and a full panorama is
+// hundreds of tiles. The old default of 50 in flight tripped that readily,
+// returning 429 for every tile and failing the load. Browsers cap HTTP/1.1 at
+// roughly six connections per host anyway; HTTP/2 removes that cap, so the
+// limit has to be imposed here.
+const MAX_CONCURRENT = 6;
 
-// Firing every tile at once can make the browser drop image loads that would
-// otherwise succeed, and one dropped tile used to fail the whole panorama.
+// One dropped tile used to fail the whole panorama, so tiles are retried. Image
+// events cannot report a status code, so a 429 is indistinguishable from a
+// dropped connection: back off hard and stop early rather than amplifying a
+// rate limit that is already biting.
 const MAX_ATTEMPTS = 3;
-const RETRY_DELAY = 250;
+const RETRY_BASE_DELAY = 600;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Exponential with jitter, so a whole pool that fails together doesn't retry in
+// lockstep and hit the limiter as one burst again.
+function retryDelay(attempt) {
+  return RETRY_BASE_DELAY * 2 ** (attempt - 1) * (0.5 + Math.random());
+}
 
 // Loads a tile into an Image. Rejects with NO_IMAGE if the request fails, or
 // with `run.reason` if the run has been cancelled.
 //
 // Cancellation goes through `run.inflight` rather than an abort listener per
-// tile: with MAX_CONCURRENT tiles in the air that would be 50 listeners on one
-// signal, which trips EventTarget's leak warning.
+// tile, which would put one listener per in-flight tile on a single signal and
+// trip EventTarget's leak warning.
 function loadTile(task, run) {
   return new Promise((resolve, reject) => {
     if (run.cancelled) {
@@ -61,7 +74,10 @@ function loadTile(task, run) {
 }
 
 class Stitcher {
-  constructor(canvas) {
+  // `concurrency` is worth lowering further if you are loading several
+  // panoramas in a row and seeing 429s.
+  constructor(canvas, { concurrency = MAX_CONCURRENT } = {}) {
+    this.concurrency = concurrency;
     this.canvas = canvas;
     this.ctx = this.canvas.getContext("2d");
     this.queue = [];
@@ -120,7 +136,7 @@ class Stitcher {
         } catch (e) {
           if (run.cancelled || attempt >= MAX_ATTEMPTS) throw e;
           this.retries++;
-          await sleep(RETRY_DELAY * attempt);
+          await sleep(retryDelay(attempt));
         }
       }
     };
@@ -146,7 +162,7 @@ class Stitcher {
     };
 
     const workers = [];
-    for (let i = 0; i < Math.min(tasks.length, MAX_CONCURRENT); i++) {
+    for (let i = 0; i < Math.min(tasks.length, this.concurrency); i++) {
       workers.push(worker());
     }
 

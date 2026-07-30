@@ -160,3 +160,29 @@ test("retry count resets between runs", async () => {
   await s.process();
   assert.equal(s.retries, 0);
 });
+
+test("concurrency is capped, and configurable", async () => {
+  // The default has to stay modest: Google rate-limits the tile hosts, and 429s
+  // are indistinguishable from any other image error.
+  const s = new Stitcher(new FakeCanvas(), { concurrency: 3 });
+  for (let i = 0; i < 50; i++) {
+    s.addTileTask(tile(`https://example.com/ok-${i}`));
+  }
+
+  // The stub settles on a macrotask, so every tile started before the first
+  // one settles is genuinely concurrent. With a pool of 3 that is 3.
+  const started = [];
+  const before = loads.length;
+  const p = s.process();
+  await Promise.resolve();
+  started.push(loads.length - before);
+  await p;
+
+  assert.equal(started[0], 3, `expected 3 tiles in the first burst`);
+  assert.equal(s.loaded, 50);
+});
+
+test("the default concurrency is modest enough not to trip rate limits", async () => {
+  const s = new Stitcher(new FakeCanvas());
+  assert.ok(s.concurrency <= 8, `default concurrency is ${s.concurrency}`);
+});

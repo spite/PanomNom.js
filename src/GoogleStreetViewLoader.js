@@ -16,8 +16,8 @@ const GRID_26 = {
 };
 
 class GoogleStreetViewLoader extends Loader {
-  constructor() {
-    super();
+  constructor(options = {}) {
+    super(options);
 
     this.zoom = 1;
     this.metadata = {};

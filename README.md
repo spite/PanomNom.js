@@ -10,6 +10,14 @@ Current supported sources
 - Google PhotoSpheres
 - Google Street View panorama depth and planes info
 
+> **Rate limits:** Google limits how fast a single client may pull tiles. Loaders fetch 6 at a time by default; if you load several panoramas back to back and start seeing failures, lower it:
+>
+> ```javascript
+> const loader = new GoogleStreetViewLoader({ concurrency: 3 });
+> ```
+>
+> A tile request that is being rate-limited returns 429, but image loads cannot report a status code, so it surfaces as `NO_IMAGE` like any other tile failure. If a panorama that previously worked starts failing at 0%, wait a few minutes before retrying.
+
 > **Heads up:** this library reads undocumented Google endpoints that are not part of any public API. They can change or disappear without notice, coverage varies by panorama, and using them is likely contrary to the Google Maps Platform Terms of Service. Treat it as a toy, not as infrastructure.
 
 ### Install

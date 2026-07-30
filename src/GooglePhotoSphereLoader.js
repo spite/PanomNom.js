@@ -16,8 +16,8 @@ async function getPhotoSphereInfo(id) {
 }
 
 class GooglePhotoSphereLoader extends Loader {
-  constructor() {
-    super();
+  constructor(options = {}) {
+    super(options);
 
     this.zoom = 1;
     this.metadata = {};
