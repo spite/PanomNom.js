@@ -1,15 +1,7 @@
-async function loadAsync(src) {
-  return new Promise((resolve, reject) => {
-    const s = document.createElement("script");
-    s.type = "text/javascript";
-    s.src = src;
-    const x = document.getElementsByTagName("script")[0];
-    x.parentNode.insertBefore(s, x);
-    s.addEventListener("load", resolve);
-    s.addEventListener("error", reject);
-  });
-}
+import { PanomNomError, ErrorCodes } from "./errors.js";
 
+// Both Google services are lazily constructed and cached: they can only be
+// built once google.maps has loaded, which callers can't be forced to sequence.
 let GoogleStreetViewService;
 let GoogleGeoCoder;
 
@@ -29,86 +21,131 @@ function getGoogleGeoCoder() {
 
 async function resolveAddress(address) {
   const geocoder = getGoogleGeoCoder();
-  return new Promise((resolve, reject) => {
-    geocoder.geocode({ address: address }, (results, status) => {
-      if (status == google.maps.GeocoderStatus.OK) {
-        resolve(results[0].geometry.location);
-      } else {
-        reject(
-          "Geocode was not successful for the following reason: " + status
-        );
-      }
-    });
-  });
+  try {
+    const { results } = await geocoder.geocode({ address });
+    return results[0].geometry.location;
+  } catch (e) {
+    throw new PanomNomError(
+      ErrorCodes.ZERO_RESULTS,
+      `Geocode was not successful for "${address}"`,
+      { cause: e }
+    );
+  }
 }
 
 // https://developers.google.com/maps/documentation/javascript/reference/street-view-service
 
 async function getPanoramaById(id) {
   const service = getGoogleStreetViewService();
-  return new Promise((resolve, reject) => {
-    service.getPanorama({ pano: id }, (data, status) => {
-      if (data) {
-        resolve(data);
-      } else {
-        reject(status);
-      }
-    });
-  });
+  try {
+    const { data } = await service.getPanorama({ pano: id });
+    return data;
+  } catch (e) {
+    throw new PanomNomError(
+      ErrorCodes.ZERO_RESULTS,
+      `No panorama found for id "${id}"`,
+      { cause: e }
+    );
+  }
 }
 
 async function getIdByLocation(lat, lon) {
   const service = getGoogleStreetViewService();
   const latLng = new google.maps.LatLng(lat, lon);
   try {
-    const res = await service.getPanorama({
+    return await service.getPanorama({
       location: latLng,
       radius: 50,
       source: "outdoor",
     });
-    return res;
   } catch (e) {
-    throw e;
+    throw new PanomNomError(
+      ErrorCodes.ZERO_RESULTS,
+      `No panorama found near ${lat},${lon}`,
+      { cause: e }
+    );
   }
 }
 
-function getQueryVariable(query, variable) {
-  const parts = query.split("?");
-  const params = new URLSearchParams(parts[1]);
-  return params.get(variable);
+// Google Maps URLs embed other URLs, so the pano id can live in a query string
+// that isn't the first one. Check them all.
+function getQueryVariable(url, variable) {
+  for (const segment of url.split("?").slice(1)) {
+    const value = new URLSearchParams(segment).get(variable);
+    if (value) return value;
+  }
+  return null;
+}
+
+// Entity kinds used in the "!2e<kind>" token of a Maps data URL.
+const ENTITY_KINDS = { 0: "street-view", 10: "photo-sphere" };
+
+// A /maps/place/ URL carries two !1s tokens: the panorama id, and the place's
+// feature id (e.g. "0x12a49816718e30e5:0x44b0fb3d4f47660a"). Only the panorama
+// is immediately followed by !2e<kind>, so prefer that pairing rather than
+// trusting whichever token happens to come first.
+function findPanoToken(decoded) {
+  const withKind = decoded.match(/!1s([^!]+)!2e(\d+)/);
+  if (withKind) return { id: withKind[1], kind: withKind[2] };
+
+  // Older URLs omit !2e entirely.
+  const bare = decoded.match(/!1s([^!]+)/);
+  return bare ? { id: bare[1], kind: null } : null;
+}
+
+// Maps data URLs are a flat list of "!<index><type><value>" tokens:
+//
+//   !1s<panoId>  the panorama id
+//   !2e<kind>    0 for Street View, 10 for a photo sphere
+//   !6s<url>     a thumbnail whose base doubles as the tile endpoint
+//
+// Newer photo spheres are served from an opaque googleusercontent media id that
+// appears only in !6s — it cannot be derived from the panorama id, so a URL is
+// the only way to reach them.
+function parsePanoURL(url) {
+  const decoded = decodeURIComponent(url);
+
+  const token = findPanoToken(decoded);
+  if (!token) {
+    throw new PanomNomError(
+      ErrorCodes.NO_PANO_ID,
+      `Can't find panorama id in specified URL`
+    );
+  }
+
+  // Everything after "=" is the sizing suffix, which we replace per tile.
+  const tileBase = decoded.match(/!6s(https?:\/\/[^!]+)/)?.[1]?.split("=")[0];
+
+  return {
+    id: token.id,
+    kind: ENTITY_KINDS[token.kind] ?? null,
+    tileBase: tileBase ?? null,
+  };
 }
 
 function getIdFromURL(url) {
-  url = decodeURIComponent(url);
-  if (url.indexOf("panoid") != -1) {
-    // https://maps.google.com/?ll=40.741352,-73.986096&spn=0.002248,0.004372&t=m&z=18&layer=c&cbll=40.741825,-73.986315&panoid=NOMYgwQ4YfVqMJogsbMcrg&cbp=12,208.53,,0,6.03
-    const panoId = getQueryVariable(url, "panoid");
-    return panoId;
-  } else if (url.indexOf("!1s") != -1) {
-    const pos = url.indexOf("!1s") + 3;
-    const npos = url.substr(pos).indexOf("!");
-    const panoId = url.substr(pos, npos);
-    return panoId;
-    // https://www.google.com/maps/preview?authuser=0#!q=Eleanor+Roosevelt+Playground&data=!1m8!1m3!1d3!2d-73.935845!3d40.693159!2m2!1f170.65!2f90!4f75!2m4!1e1!2m2!1s0Zn7rPD9Q4KOhRyEugT1qA!2e0!4m15!2m14!1m13!1s0x0%3A0x63459d24c457bec7!3m8!1m3!1d11440!2d-73.9085059!3d40.6833656!3m2!1i1329!2i726!4f13.1!4m2!3d40.6929389!4d-73.9357996&fid=5
-  } else {
-    throw new Error(`Can't find panorama id in specified URL`);
-  }
+  const decoded = decodeURIComponent(url);
+
+  // https://maps.google.com/?ll=40.741352,-73.986096&cbll=40.741825,-73.986315&panoid=NOMYgwQ4YfVqMJogsbMcrg&cbp=12,208.53,,0,6.03
+  const fromQuery = getQueryVariable(decoded, "panoid");
+  if (fromQuery) return fromQuery;
+
+  // https://www.google.com/maps/@51.5316182,-0.125108,3a,75y/data=!3m6!1e1!3m4!1skCisB_W6mNaYBgdxg0AX8A!2e0!7i16384!8i8192
+  const token = findPanoToken(decoded);
+  if (token?.id) return token.id;
+
+  throw new PanomNomError(
+    ErrorCodes.NO_PANO_ID,
+    `Can't find panorama id in specified URL`
+  );
 }
 
-async function getExtraMetadata(id) {
-  const url = `http://maps.google.com/cbk?output=json&hl=x-local&cb_client=maps_sv&v=4&dm=1&pm=1&ph=1&hl=en&panoid=${id}`;
-  const res = await fetch(url);
-  const metadata = await res.json();
-  return metadata;
-}
-
+// The service getters stay module-private: they are plumbing, and exporting
+// them only invited callers to hold a handle they can't do anything useful with.
 export {
-  loadAsync,
-  getGoogleGeoCoder,
-  getGoogleStreetViewService,
   getPanoramaById,
   resolveAddress,
   getIdByLocation,
   getIdFromURL,
-  getExtraMetadata,
+  parsePanoURL,
 };
