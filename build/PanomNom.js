@@ -329,67 +329,6 @@ var PANOMNOM = (() => {
     );
   }
 
-  // src/GoogleStreetViewLoader.js
-  var GRID_32 = {
-    levels: [1, 2, 4, 8, 16, 32],
-    widths: [512, 1024, 2048, 4096, 8192, 16384]
-  };
-  var GRID_26 = {
-    levels: [1, 2, 4, 7, 13, 26],
-    widths: [416, 832, 1664, 3328, 6656, 13312]
-  };
-  var GoogleStreetViewLoader = class extends Loader {
-    constructor(options = {}) {
-      super(options);
-      this.zoom = 1;
-      this.metadata = {};
-    }
-    // zoom is an index into the tile pyramid: 0 is a single tile, 5 is full
-    // resolution.
-    async load(id, zoom = 1) {
-      const metadata = await getPanoramaById(id);
-      this.metadata = metadata;
-      this.panoId = id;
-      const { worldSize, tileSize } = metadata.tiles;
-      const grid = worldSize.width / 512 === 32 ? GRID_32 : GRID_26;
-      if (!Number.isInteger(zoom) || zoom < 0 || zoom >= grid.widths.length) {
-        throw new PanomNomError(
-          ErrorCodes.INVALID_ZOOM,
-          `Zoom must be an integer between 0 and ${grid.widths.length - 1}, got ${zoom}`
-        );
-      }
-      this.zoom = zoom;
-      const aspectRatio = worldSize.width / worldSize.height;
-      this.canvas.width = grid.widths[zoom];
-      this.canvas.height = Math.round(this.canvas.width / aspectRatio);
-      const w = grid.levels[zoom];
-      const h = Math.ceil(w / aspectRatio);
-      const getTileUrl = typeof metadata.tiles?.getTileUrl === "function" ? (x, y) => metadata.tiles.getTileUrl(id, zoom, x, y) : null;
-      if (!getTileUrl) {
-        const wrapped = decodePanoId(id);
-        if (wrapped && wrapped.kind !== "street-view") {
-          throw new PanomNomError(
-            ErrorCodes.BAD_METADATA,
-            `"${id}" is a ${wrapped.kind} (${wrapped.id}), not a Street View panorama. Its tiles are not served from the Street View endpoint \u2014 use GooglePhotoSphereLoader.loadFromURL with its Maps URL instead.`
-          );
-        }
-      }
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          const url = getTileUrl ? getTileUrl(x, y) : `https://geo0.ggpht.com/cbk?cb_client=maps_sv.tactile&authuser=0&hl=en&panoid=${id}&output=tile&x=${x}&y=${y}&zoom=${zoom}&nbt&fover=2`;
-          this.stitcher.addTileTask({
-            url,
-            x: x * tileSize.width,
-            y: y * tileSize.height,
-            w: tileSize.width,
-            h: tileSize.height
-          });
-        }
-      }
-      return this.stitcher.process();
-    }
-  };
-
   // src/photometa.js
   var ENTITY_STREET_VIEW = 2;
   var ENTITY_PHOTO_SPHERE = 10;
@@ -449,6 +388,83 @@ var PANOMNOM = (() => {
       authorURL: tryPick(info, [1, 0, 4, 1, 0, 1])
     };
   }
+  async function getStreetViewMetadata(id) {
+    const info = await fetchPhotometa(id, ENTITY_STREET_VIEW);
+    const size = pick(info, [1, 0, 2, 2], id);
+    const tile = pick(info, [1, 0, 2, 3, 1], id);
+    return {
+      tiles: {
+        // photometa reports [height, width].
+        worldSize: { width: size[1], height: size[0] },
+        tileSize: { width: tile[1], height: tile[0] }
+      },
+      ...extractAttribution(info)
+    };
+  }
+
+  // src/GoogleStreetViewLoader.js
+  function hasGoogleMaps() {
+    return typeof google !== "undefined" && typeof google.maps?.StreetViewService === "function";
+  }
+  var GRID_32 = {
+    levels: [1, 2, 4, 8, 16, 32],
+    widths: [512, 1024, 2048, 4096, 8192, 16384]
+  };
+  var GRID_26 = {
+    levels: [1, 2, 4, 7, 13, 26],
+    widths: [416, 832, 1664, 3328, 6656, 13312]
+  };
+  var GoogleStreetViewLoader = class extends Loader {
+    constructor(options = {}) {
+      super(options);
+      this.zoom = 1;
+      this.metadata = {};
+    }
+    // zoom is an index into the tile pyramid: 0 is a single tile, 5 is full
+    // resolution.
+    async load(id, zoom = 1) {
+      const metadata = hasGoogleMaps() ? await getPanoramaById(id) : await getStreetViewMetadata(id);
+      this.metadata = metadata;
+      this.panoId = id;
+      const { worldSize, tileSize } = metadata.tiles;
+      const grid = worldSize.width / 512 === 32 ? GRID_32 : GRID_26;
+      if (!Number.isInteger(zoom) || zoom < 0 || zoom >= grid.widths.length) {
+        throw new PanomNomError(
+          ErrorCodes.INVALID_ZOOM,
+          `Zoom must be an integer between 0 and ${grid.widths.length - 1}, got ${zoom}`
+        );
+      }
+      this.zoom = zoom;
+      const aspectRatio = worldSize.width / worldSize.height;
+      this.canvas.width = grid.widths[zoom];
+      this.canvas.height = Math.round(this.canvas.width / aspectRatio);
+      const w = grid.levels[zoom];
+      const h = Math.ceil(w / aspectRatio);
+      const getTileUrl = typeof metadata.tiles?.getTileUrl === "function" ? (x, y) => metadata.tiles.getTileUrl(id, zoom, x, y) : null;
+      if (!getTileUrl) {
+        const wrapped = decodePanoId(id);
+        if (wrapped && wrapped.kind !== "street-view") {
+          throw new PanomNomError(
+            ErrorCodes.BAD_METADATA,
+            `"${id}" is a ${wrapped.kind} (${wrapped.id}), not a Street View panorama. Its tiles are not served from the Street View endpoint \u2014 use GooglePhotoSphereLoader.loadFromURL with its Maps URL instead.`
+          );
+        }
+      }
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const url = getTileUrl ? getTileUrl(x, y) : `https://geo0.ggpht.com/cbk?cb_client=maps_sv.tactile&authuser=0&hl=en&panoid=${id}&output=tile&x=${x}&y=${y}&zoom=${zoom}&nbt&fover=2`;
+          this.stitcher.addTileTask({
+            url,
+            x: x * tileSize.width,
+            y: y * tileSize.height,
+            w: tileSize.width,
+            h: tileSize.height
+          });
+        }
+      }
+      return this.stitcher.process();
+    }
+  };
 
   // src/GooglePhotoSphereLoader.js
   async function getPhotoSphereInfo(id) {

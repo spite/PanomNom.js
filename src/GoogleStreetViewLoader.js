@@ -1,6 +1,17 @@
 import { Loader } from "./Loader.js";
 import { getPanoramaById, decodePanoId } from "./utils.js";
+import { getStreetViewMetadata } from "./photometa.js";
 import { PanomNomError, ErrorCodes } from "./errors.js";
+
+// The Maps JS API gives richer metadata, including getTileUrl, but it is not
+// always available: a Chrome MV3 extension cannot load it at all, since that
+// counts as remote code. Fall back to photometa when it is absent.
+function hasGoogleMaps() {
+  return (
+    typeof google !== "undefined" &&
+    typeof google.maps?.StreetViewService === "function"
+  );
+}
 
 // Street View serves panoramas on one of two tile grids. Both are fixed
 // pyramids where each level doubles, but the older imagery is cropped to 26
@@ -26,7 +37,9 @@ class GoogleStreetViewLoader extends Loader {
   // zoom is an index into the tile pyramid: 0 is a single tile, 5 is full
   // resolution.
   async load(id, zoom = 1) {
-    const metadata = await getPanoramaById(id);
+    const metadata = hasGoogleMaps()
+      ? await getPanoramaById(id)
+      : await getStreetViewMetadata(id);
     this.metadata = metadata;
     this.panoId = id;
 

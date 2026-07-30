@@ -85,11 +85,34 @@ function extractAttribution(info) {
   };
 }
 
+// The same tile metadata the Maps JS API reports, read straight from photometa.
+//
+// This is what makes Street View usable without the Maps API at all — needed
+// in a Chrome MV3 extension, where loading Google's script is forbidden as
+// remote code, and anywhere you would rather not pull in the whole Maps SDK.
+// The one thing it cannot supply is getTileUrl, so callers fall back to
+// building tile URLs themselves.
+async function getStreetViewMetadata(id) {
+  const info = await fetchPhotometa(id, ENTITY_STREET_VIEW);
+  const size = pick(info, [1, 0, 2, 2], id);
+  const tile = pick(info, [1, 0, 2, 3, 1], id);
+
+  return {
+    tiles: {
+      // photometa reports [height, width].
+      worldSize: { width: size[1], height: size[0] },
+      tileSize: { width: tile[1], height: tile[0] },
+    },
+    ...extractAttribution(info),
+  };
+}
+
 export {
   fetchPhotometa,
   pick,
   tryPick,
   extractAttribution,
+  getStreetViewMetadata,
   ENTITY_STREET_VIEW,
   ENTITY_PHOTO_SPHERE,
 };

@@ -472,3 +472,27 @@ test("loadFromURL succeeds where load(getIdFromURL(url)) cannot", opts, async ()
   assert.equal(loads.length, 1);
   assert.ok(loads[0].startsWith("https://lh3.googleusercontent.com/"));
 });
+
+test("street view loads with no Maps API present at all", opts, async () => {
+  // A Chrome MV3 extension cannot load the Maps JS API, since that counts as
+  // remote code. Metadata has to come from photometa instead.
+  const failures = installFetchingImage();
+  delete globalThis.google;
+
+  const { GoogleStreetViewLoader } = await import(
+    "../src/GoogleStreetViewLoader.js"
+  );
+
+  const loader = new GoogleStreetViewLoader();
+  loads.length = 0;
+  await loader.load(SV_PANO, 1);
+
+  assert.equal(failures.length, 0, `tiles failed: ${failures.join(", ")}`);
+  assert.equal(loads.length, 2);
+  assert.equal(loader.canvas.width, 832);
+  assert.equal(typeof loader.metadata.copyright, "string");
+  assert.deepEqual(loader.metadata.tiles.worldSize, {
+    width: 13312,
+    height: 6656,
+  });
+});
