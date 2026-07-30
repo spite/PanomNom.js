@@ -1,6 +1,7 @@
 {
   "name": "panomnom.js",
   "version": "1.0.0",
+  "private": true,
   "description": "Panorama fetching tools for JavaScript",
   "type": "module",
   "main": "./build/PanomNom.module.js",

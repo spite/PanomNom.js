@@ -30,11 +30,11 @@ Current supported sources
 
 ### Install
 
-```bash
-npm install panomnom.js
-```
+Not published to npm, and deliberately so: this reads undocumented Google
+endpoints, and a package on a registry invites people to depend on it as if it
+were supported. `package.json` is marked `private` to keep that accidental.
 
-Or vendor `build/PanomNom.module.js` directly.
+Vendor `build/PanomNom.module.js`, or add the repository as a git dependency.
 
 ### How to use
 
