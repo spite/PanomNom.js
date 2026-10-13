@@ -222,6 +222,6 @@ PANOMNOM_NETWORK=1 npm test
 
 MIT licensed
 
-Copyright (C) 2022 Jaume Sanchez Elias http://twitter.com/thespite
+Copyright (C) 2022 Jaume Sanchez Elias https://twitter.com/thespite
 
-http://www.clicktorelease.com
+https://www.clicktorelease.com
