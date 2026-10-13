@@ -10,6 +10,32 @@ Current supported sources
 - Google PhotoSpheres
 - Google Street View panorama depth and planes info
 
+#### Demos ####
+- **[Street View panorama from id](https://spite.github.io/PanomNom.js/examples/basic/sv-panoid.html)**
+- **[Street View panorama from lat,lng](https://spite.github.io/PanomNom.js/examples/basic/sv-location.html)**
+- **[Street View panorama from URL](https://spite.github.io/PanomNom.js/examples/basic/sv-url.html)**
+- **[Street View depth map](https://spite.github.io/PanomNom.js/examples/basic/sv-depth.html)**
+- **[PhotoSphere from id](https://spite.github.io/PanomNom.js/examples/basic/ps-panoid.html)**
+- **[PhotoSphere from URL](https://spite.github.io/PanomNom.js/examples/basic/ps-url.html)**
+- **[Using the built bundle](https://spite.github.io/PanomNom.js/examples/basic/bundle.html)**
+- **[Floating Shiny Knot](https://spite.github.io/FloatingShinyKnot/)**: a more complete example, with Leaflet map control and more
+
+#### 2026 update ####
+**Disclaimer:** this library started in 2014, and reads undocumented Google endpoints that are not part of any public API. They can change or disappear without notice, coverage varies by panorama, and using them is likely contrary to the Google Maps Platform Terms of Service. Treat it as a toy, not as infrastructure
+
+Google has a supported way to get this imagery now, the [Map Tiles API](https://developers.google.com/maps/documentation/tile/streetview), which serves Street View tiles and metadata with an API key. Use that for anything that has to keep working.
+
+The library has been updated. What changed:
+
+- a panorama that fails doesn't leave the loader hanging, and a loader can be reused or cancelled without mixing two panoramas
+- tiles are fetched 6 at a time instead of 50, retried before giving up, and a request that Google throttles is reported as its own error
+- the ids that are not Street View panoramas are handled: photo spheres, and the newer ones that need the Maps URL
+- the metadata, the parsing of URLs and the decoding of the depth maps were fixed
+- errors have a code to tell them apart
+- Street View panoramas can load without the Maps JavaScript API
+- there's a build, a test suite and CI, and the examples that were broken work again
+- it's not on npm, on purpose
+
 > **Rate limits:** Google limits how fast a single client may pull tiles. Loaders fetch 6 at a time by default; if you load several panoramas back to back and start seeing failures, lower it:
 >
 > ```javascript
@@ -26,8 +52,6 @@ Current supported sources
 >
 > A 429 carrying a short `Retry-After` is waited out; anything longer fails immediately, because retrying into a limiter is what deepens it.
 
-> **Heads up:** this library reads undocumented Google endpoints that are not part of any public API. They can change or disappear without notice, coverage varies by panorama, and using them is likely contrary to the Google Maps Platform Terms of Service. Treat it as a toy, not as infrastructure.
-
 ### Install
 
 Not published to npm, and deliberately so: this reads undocumented Google
@@ -38,7 +62,7 @@ Vendor `build/PanomNom.module.js`, or add the repository as a git dependency.
 
 ### How to use
 
-Include the google maps API for the services to resolve metadata. This is needed by `GoogleStreetViewLoader`, `getIdByLocation` and `resolveAddress`; the PhotoSphere and depth loaders do not use it.
+Include the google maps API for the services to resolve metadata. This is needed by `getIdByLocation` and `resolveAddress`, and `GoogleStreetViewLoader` uses it when it's there, to know where the imagery that is not Street View lives; the PhotoSphere and depth loaders do not use it.
 
 ```html
 <script src="https://maps.google.com/maps/api/js"></script>
@@ -177,7 +201,7 @@ try {
 
 # About copyright notice
 
-Very important: `loader.metadata.copyright` contains the copyright notice for the retrieved images, and `GooglePhotoSphereLoader` additionally exposes `author` / `authorURL`. You should display them somewhere in your page. See `examples/basic/ps-panoid.html` for how.
+Very important: `loader.metadata.copyright` contains the copyright notice for the retrieved images, and `GooglePhotoSphereLoader` additionally exposes `author` / `authorURL`. You should display them somewhere in your page. See [examples/basic/ps-panoid.html](examples/basic/ps-panoid.html) for how.
 
 # Development
 
@@ -193,22 +217,6 @@ The suite also contains integration tests that hit the live Google endpoints. Th
 ```bash
 PANOMNOM_NETWORK=1 npm test
 ```
-
-# Examples
-
-Please see the examples folder for proper implementations of each case.
-
-[Street View panorama from id](https://spite.github.io/PanomNom.js/examples/basic/sv-panoid.html)  
-[Street View panorama from lat,lng](https://spite.github.io/PanomNom.js/examples/basic/sv-location.html)  
-[Street View panorama from URL](https://spite.github.io/PanomNom.js/examples/basic/sv-url.html)  
-[Street View depth map](https://spite.github.io/PanomNom.js/examples/basic/sv-depth.html)  
-[PhotoSphere from id](https://spite.github.io/PanomNom.js/examples/basic/ps-panoid.html)  
-[PhotoSphere from URL](https://spite.github.io/PanomNom.js/examples/basic/ps-url.html)  
-[Using the built bundle](https://spite.github.io/PanomNom.js/examples/basic/bundle.html)
-
-A more complete example, with Leaflet map control and more:
-
-[Floating Shiny Knot](https://spite.github.io/FloatingShinyKnot/)
 
 # License
 
