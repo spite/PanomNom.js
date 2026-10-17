@@ -146,6 +146,8 @@ Photo spheres come in two generations. Older ones (`AF1Qip…` ids) are served f
 await loader.loadFromURL(mapsURL, 3);
 ```
 
+The media id in a Maps URL stops working after a while, and its tiles then fail with HTTP 403, so copy a fresh URL from Maps rather than saving one.
+
 `parsePanoURL` exposes the pieces if you want them separately. `kind` is `"photo-sphere"` or `"street-view"`, which is a more reliable check than guessing from the id's shape:
 
 ```javascript
