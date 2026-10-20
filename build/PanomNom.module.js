@@ -5,6 +5,12 @@ var ErrorCodes = {
   ZERO_RESULTS: "ZERO_RESULTS",
   BAD_METADATA: "BAD_METADATA",
   INVALID_ZOOM: "INVALID_ZOOM",
+  // A request never reached Google: offline, blocked, or refused by CORS.
+  NETWORK: "NETWORK",
+  // The load was superseded by another one on the same loader, or cancel() was called.
+  CANCELLED: "CANCELLED",
+  // A newer photo sphere whose media URL could not be found.
+  NEEDS_MAPS_URL: "NEEDS_MAPS_URL",
   // Google is throttling this client. Distinguishable only because tiles are
   // fetched rather than loaded through an <img>, which cannot report a status.
   RATE_LIMITED: "RATE_LIMITED"
@@ -36,7 +42,7 @@ function parseRetryAfter(value) {
 async function loadTile(task, signal) {
   let res;
   try {
-    res = await fetch(task.url, { mode: "cors", signal });
+    res = await fetch(task.url, { mode: "cors", referrerPolicy: "no-referrer", signal });
   } catch (e) {
     if (signal.aborted) throw signal.reason ?? e;
     throw new PanomNomError(
@@ -54,10 +60,12 @@ async function loadTile(task, signal) {
     throw error;
   }
   if (!res.ok) {
-    throw new PanomNomError(
+    const error = new PanomNomError(
       ErrorCodes.NO_IMAGE,
       `Could not load tile ${task.url} (HTTP ${res.status})`
     );
+    error.status = res.status;
+    throw error;
   }
   try {
     return await createImageBitmap(await res.blob());
@@ -96,8 +104,9 @@ var Stitcher = class {
     this.onProgress(this.toLoad === 0 ? 100 : this.loaded * 100 / this.toLoad);
   }
   // Consumes the queued tasks and draws them onto the canvas. Always starts
-  // from a clean slate, so a Stitcher can be reused across loads.
-  async process() {
+  // from a clean slate, so a Stitcher can be reused across loads. Aborting
+  // `signal` stops the run, which then rejects with the signal's reason.
+  async process(signal) {
     const tasks = this.queue.slice();
     this.reset();
     this.toLoad = tasks.length;
@@ -107,6 +116,9 @@ var Stitcher = class {
       return true;
     }
     const controller = new AbortController();
+    if (signal?.aborted) throw signal.reason;
+    const onAbort = () => controller.abort(signal.reason);
+    signal?.addEventListener("abort", onAbort, { once: true });
     let next = 0;
     const loadTileWithRetry = async (task) => {
       for (let attempt = 1; ; attempt++) {
@@ -120,6 +132,7 @@ var Stitcher = class {
             await sleep(e.retryAfter);
             continue;
           }
+          if (e.status >= 400 && e.status < 500) throw e;
           this.retries++;
           await sleep(retryDelay(attempt));
         }
@@ -129,6 +142,10 @@ var Stitcher = class {
       while (next < tasks.length && !controller.signal.aborted) {
         const task = tasks[next++];
         const bitmap = await loadTileWithRetry(task);
+        if (controller.signal.aborted) {
+          bitmap.close?.();
+          return;
+        }
         this.ctx.drawImage(
           bitmap,
           0,
@@ -155,7 +172,10 @@ var Stitcher = class {
       controller.abort(e);
       await Promise.allSettled(workers);
       throw e;
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
     }
+    if (controller.signal.aborted) throw controller.signal.reason;
     return true;
   }
 };
@@ -171,6 +191,18 @@ var Loader = class {
   }
   async load() {
     throw new Error(`${this.constructor.name} does not implement load()`);
+  }
+  // Starts a run and cancels the one before it, so two loads never share the canvas.
+  begin() {
+    this.cancel();
+    this.controller = new AbortController();
+    return this.controller.signal;
+  }
+  // Stops the load in progress, which then rejects with CANCELLED.
+  cancel() {
+    this.controller?.abort(
+      new PanomNomError(ErrorCodes.CANCELLED, `${this.constructor.name} load was cancelled`)
+    );
   }
   onProgress(cb) {
     this.stitcher.onProgress = cb;
@@ -216,14 +248,14 @@ async function getPanoramaById(id) {
     );
   }
 }
-async function getIdByLocation(lat, lon) {
+async function getIdByLocation(lat, lon, { radius = 50, sources = ["google", "outdoor"] } = {}) {
   const service = getGoogleStreetViewService();
   const latLng = new google.maps.LatLng(lat, lon);
   try {
     return await service.getPanorama({
       location: latLng,
-      radius: 50,
-      source: "outdoor"
+      radius,
+      sources
     });
   } catch (e) {
     throw new PanomNomError(
@@ -242,10 +274,10 @@ function getQueryVariable(url, variable) {
 }
 var ENTITY_KINDS = { 0: "street-view", 10: "photo-sphere" };
 function decodePanoId(id) {
-  if (!/^[A-Za-z0-9_-]+$/.test(id)) return null;
+  if (!/^[A-Za-z0-9_-]+\.*$/.test(id)) return null;
   let bytes;
   try {
-    const b64 = id.replace(/-/g, "+").replace(/_/g, "/");
+    const b64 = id.replace(/\.+$/, "").replace(/-/g, "+").replace(/_/g, "/");
     const binary = atob(b64.padEnd(Math.ceil(b64.length / 4) * 4, "="));
     bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
   } catch {
@@ -265,42 +297,68 @@ function findPanoToken(decoded) {
   const bare = decoded.match(/!1s([^!]+)/);
   return bare ? { id: bare[1], kind: null } : null;
 }
+function decodeURL(url) {
+  try {
+    return decodeURIComponent(url);
+  } catch (e) {
+    throw new PanomNomError(
+      ErrorCodes.NO_PANO_ID,
+      `Can't read the URL: it has a malformed %-escape`,
+      { cause: e }
+    );
+  }
+}
+function findTileBase(decoded) {
+  const candidate = decoded.match(/!6s(https?:\/\/[^!]+)/)?.[1];
+  if (!candidate) return null;
+  let host;
+  try {
+    host = new URL(candidate).hostname;
+  } catch {
+    return null;
+  }
+  if (!/(^|\.)googleusercontent\.com$/.test(host)) return null;
+  return candidate.split("=")[0];
+}
 function parsePanoURL(url) {
-  const decoded = decodeURIComponent(url);
+  const decoded = decodeURL(url);
   const token = findPanoToken(decoded);
-  if (!token) {
+  const fromQuery = getQueryVariable(decoded, "panoid")?.split("!")[0];
+  const id = token?.kind != null && token.id || fromQuery || token?.id;
+  if (!id) {
     throw new PanomNomError(
       ErrorCodes.NO_PANO_ID,
       `Can't find panorama id in specified URL`
     );
   }
-  const tileBase = decoded.match(/!6s(https?:\/\/[^!]+)/)?.[1]?.split("=")[0];
   return {
-    id: token.id,
-    kind: ENTITY_KINDS[token.kind] ?? null,
-    tileBase: tileBase ?? null
+    id,
+    kind: token?.id === id ? ENTITY_KINDS[token.kind] ?? null : null,
+    tileBase: findTileBase(decoded)
   };
 }
 function getIdFromURL(url) {
-  const decoded = decodeURIComponent(url);
-  const fromQuery = getQueryVariable(decoded, "panoid");
-  if (fromQuery) return fromQuery;
-  const token = findPanoToken(decoded);
-  if (token?.id) return token.id;
-  throw new PanomNomError(
-    ErrorCodes.NO_PANO_ID,
-    `Can't find panorama id in specified URL`
-  );
+  return parsePanoURL(url).id;
 }
 
 // src/photometa.js
 var ENTITY_STREET_VIEW = 2;
 var ENTITY_PHOTO_SPHERE = 10;
 function photometaURL(id, kind) {
-  return `https://www.google.com/maps/photometa/v1?authuser=0&hl=en&gl=uk&pb=!1m4!1smaps_sv.tactile!11m2!2m1!1b1!2m2!1sen!2suk!3m3!1m2!1e${kind}!2s${id}!4m57!1e1!1e2!1e3!1e4!1e5!1e6!1e8!1e12!2m1!1e1!4m1!1i48!5m1!1e1!5m1!1e2!6m1!1e1!6m1!1e2!9m36!1m3!1e2!2b1!3e2!1m3!1e2!2b0!3e3!1m3!1e3!2b1!3e2!1m3!1e3!2b0!3e3!1m3!1e8!2b0!3e3!1m3!1e1!2b0!3e3!1m3!1e4!2b0!3e3!1m3!1e10!2b1!3e2!1m3!1e10!2b0!3e3`;
+  return `https://www.google.com/maps/photometa/v1?authuser=0&hl=en&gl=uk&pb=!1m4!1smaps_sv.tactile!11m2!2m1!1b1!2m2!1sen!2suk!3m3!1m2!1e${kind}!2s${id}!4m61!1e1!1e2!1e3!1e4!1e5!1e6!1e8!1e12!1e17!2m1!1e1!4m1!1i48!5m1!1e1!5m1!1e2!6m1!1e1!6m1!1e2!9m36!1m3!1e2!2b1!3e2!1m3!1e2!2b0!3e3!1m3!1e3!2b1!3e2!1m3!1e3!2b0!3e3!1m3!1e8!2b0!3e3!1m3!1e1!2b0!3e3!1m3!1e4!2b0!3e3!1m3!1e10!2b1!3e2!1m3!1e10!2b0!3e3!11m2!3m1!4b1`;
 }
-async function fetchPhotometa(id, kind) {
-  const res = await fetch(photometaURL(id, kind));
+async function fetchPhotometa(id, kind, signal) {
+  let res;
+  try {
+    res = await fetch(photometaURL(id, kind), { signal });
+  } catch (e) {
+    if (signal?.aborted) throw signal.reason;
+    throw new PanomNomError(
+      ErrorCodes.NETWORK,
+      `photometa request for "${id}" did not reach Google`,
+      { cause: e }
+    );
+  }
   if (!res.ok) {
     throw new PanomNomError(
       ErrorCodes.BAD_METADATA,
@@ -352,8 +410,8 @@ function extractAttribution(info) {
     authorURL: tryPick(info, [1, 0, 4, 1, 0, 1])
   };
 }
-async function getStreetViewMetadata(id) {
-  const info = await fetchPhotometa(id, ENTITY_STREET_VIEW);
+async function getStreetViewMetadata(id, signal) {
+  const info = await fetchPhotometa(id, ENTITY_STREET_VIEW, signal);
   const size = pick(info, [1, 0, 2, 2], id);
   const tile = pick(info, [1, 0, 2, 3, 1], id);
   return {
@@ -387,7 +445,9 @@ var GoogleStreetViewLoader = class extends Loader {
   // zoom is an index into the tile pyramid: 0 is a single tile, 5 is full
   // resolution.
   async load(id, zoom = 1) {
-    const metadata = hasGoogleMaps() ? await getPanoramaById(id) : await getStreetViewMetadata(id);
+    const signal = this.begin();
+    const metadata = hasGoogleMaps() ? await getPanoramaById(id) : await getStreetViewMetadata(id, signal);
+    signal.throwIfAborted();
     this.metadata = metadata;
     this.panoId = id;
     const { worldSize, tileSize } = metadata.tiles;
@@ -410,13 +470,13 @@ var GoogleStreetViewLoader = class extends Loader {
       if (wrapped && wrapped.kind !== "street-view") {
         throw new PanomNomError(
           ErrorCodes.BAD_METADATA,
-          `"${id}" is a ${wrapped.kind} (${wrapped.id}), not a Street View panorama. Its tiles are not served from the Street View endpoint \u2014 use GooglePhotoSphereLoader.loadFromURL with its Maps URL instead.`
+          `"${id}" is a ${wrapped.kind} (${wrapped.id}), not a Street View panorama. Its tiles are not served from the Street View endpoint \u2014 load "${wrapped.id}" with GooglePhotoSphereLoader instead.`
         );
       }
     }
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        const url = getTileUrl ? getTileUrl(x, y) : `https://geo0.ggpht.com/cbk?cb_client=maps_sv.tactile&authuser=0&hl=en&panoid=${id}&output=tile&x=${x}&y=${y}&zoom=${zoom}&nbt&fover=2`;
+        const url = getTileUrl ? getTileUrl(x, y) : `https://geo0.ggpht.com/cbk?cb_client=apiv3&authuser=0&hl=en&panoid=${id}&output=tile&x=${x}&y=${y}&zoom=${zoom}&nbt&fover=2`;
         this.stitcher.addTileTask({
           url,
           x: x * tileSize.width,
@@ -426,13 +486,13 @@ var GoogleStreetViewLoader = class extends Loader {
         });
       }
     }
-    return this.stitcher.process();
+    return this.stitcher.process(signal);
   }
 };
 
 // src/GooglePhotoSphereLoader.js
-async function getPhotoSphereInfo(id) {
-  return fetchPhotometa(id, ENTITY_PHOTO_SPHERE);
+async function getPhotoSphereInfo(id, signal) {
+  return fetchPhotometa(id, ENTITY_PHOTO_SPHERE, signal);
 }
 var GooglePhotoSphereLoader = class extends Loader {
   constructor(options = {}) {
@@ -440,8 +500,7 @@ var GooglePhotoSphereLoader = class extends Loader {
     this.zoom = 1;
     this.metadata = {};
   }
-  // Newer photo spheres are served from an opaque media id that only appears in
-  // the Maps URL, so this resolves both parts and hands them to load().
+  // Takes the id from a Maps URL, and the media id too when the URL has one.
   async loadFromURL(url, zoom = 1) {
     const { id, tileBase } = parsePanoURL(url);
     return this.load(id, zoom, { tileBase });
@@ -449,7 +508,9 @@ var GooglePhotoSphereLoader = class extends Loader {
   // `tileBase` overrides the tile endpoint for panoramas that aren't served
   // from lh3.ggpht.com/p/<id>. See parsePanoURL.
   async load(id, zoom = 1, { tileBase = null } = {}) {
-    const info = await getPhotoSphereInfo(id);
+    const signal = this.begin();
+    const info = await getPhotoSphereInfo(id, signal);
+    signal.throwIfAborted();
     this.panoId = id;
     const size = pick(info, [1, 0, 2, 2], id);
     const tile = pick(info, [1, 0, 2, 3, 1], id);
@@ -475,6 +536,15 @@ var GooglePhotoSphereLoader = class extends Loader {
       );
     }
     this.zoom = zoom;
+    if (!tileBase && !id.startsWith("AF1Qip")) {
+      tileBase = tryPick(info, [1, 0, 17, 0, 0])?.split("=")[0] ?? null;
+      if (!tileBase) {
+        throw new PanomNomError(
+          ErrorCodes.NEEDS_MAPS_URL,
+          `Photometa has no media URL for "${id}". Load it from its Google Maps URL instead, copied once the photo sphere has loaded (it has a !6s\u2026 part).`
+        );
+      }
+    }
     const { tileSize } = this.metadata.tiles;
     const level = levels[zoom];
     this.canvas.width = level.width;
@@ -492,7 +562,7 @@ var GooglePhotoSphereLoader = class extends Loader {
         });
       }
     }
-    return this.stitcher.process();
+    return this.stitcher.process(signal);
   }
 };
 
@@ -553,6 +623,12 @@ function computeDepthMap(header, indices, planes) {
       v[2] = cos_theta[y];
       if (planeIdx > 0) {
         const plane = planes[planeIdx];
+        if (!plane) {
+          throw new PanomNomError(
+            ErrorCodes.BAD_METADATA,
+            `Depth map pixel ${x},${y} points at plane ${planeIdx} of ${planes.length}`
+          );
+        }
         depthMap[y * w + (w - x - 1)] = Math.abs(
           plane.d / (v[0] * plane.n[0] + v[1] * plane.n[1] + v[2] * plane.n[2])
         );
@@ -573,7 +649,13 @@ var GoogleStreetViewDepthLoader = class {
   async load(panoId) {
     const json = await fetchPhotometa(panoId, ENTITY_STREET_VIEW);
     try {
-      const raw = pick(json, [1, 0, 5, 0, 5, 1, 2], panoId);
+      const raw = tryPick(json, [1, 0, 5, 0, 5, 1, 2]);
+      if (typeof raw !== "string") {
+        throw new PanomNomError(
+          ErrorCodes.BAD_METADATA,
+          `No depth map for "${panoId}". Some panoramas have none, and Google sends none to headless browsers.`
+        );
+      }
       this.depthMap = this.parse(this.decode(raw));
     } catch (e) {
       if (!this.fallbackToEmpty) {
@@ -623,6 +705,7 @@ export {
   NO_PLANE,
   PanomNomError,
   createEmptyDepthMap,
+  decodePanoId,
   getIdByLocation,
   getIdFromURL,
   getPanoramaById,

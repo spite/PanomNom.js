@@ -6,6 +6,7 @@ import {
   NO_PLANE,
 } from "./GoogleStreetViewDepthLoader.js";
 import {
+  decodePanoId,
   getIdByLocation,
   getIdFromURL,
   getPanoramaById,
@@ -20,6 +21,7 @@ export {
   GoogleStreetViewDepthLoader,
   createEmptyDepthMap,
   NO_PLANE,
+  decodePanoId,
   getIdByLocation,
   getIdFromURL,
   getPanoramaById,

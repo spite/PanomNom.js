@@ -4,15 +4,17 @@ import { parsePanoURL } from "./utils.js";
 import {
   fetchPhotometa,
   pick,
+  tryPick,
   extractAttribution,
   ENTITY_PHOTO_SPHERE,
 } from "./photometa.js";
 
-// Photo sphere ids look like AF1QipMKVZBKb5dP2my1FWB2ljCp2vXqiISTzj056YD_.
-// Unlike Street View, this loader needs no Google Maps API key or script: the
-// metadata comes straight from photometa and the tiles from lh3.ggpht.com.
-async function getPhotoSphereInfo(id) {
-  return fetchPhotometa(id, ENTITY_PHOTO_SPHERE);
+// Photo sphere ids look like AF1QipMKVZBKb5dP2my1FWB2ljCp2vXqiISTzj056YD_, or
+// CIHM0ogKEICAgIDCqvKvNg for newer ones. Unlike Street View, this loader needs no
+// Google Maps API key or script: the metadata comes straight from photometa, and
+// the tiles from lh3.ggpht.com or, for newer ones, the media photometa names.
+async function getPhotoSphereInfo(id, signal) {
+  return fetchPhotometa(id, ENTITY_PHOTO_SPHERE, signal);
 }
 
 class GooglePhotoSphereLoader extends Loader {
@@ -23,8 +25,7 @@ class GooglePhotoSphereLoader extends Loader {
     this.metadata = {};
   }
 
-  // Newer photo spheres are served from an opaque media id that only appears in
-  // the Maps URL, so this resolves both parts and hands them to load().
+  // Takes the id from a Maps URL, and the media id too when the URL has one.
   async loadFromURL(url, zoom = 1) {
     const { id, tileBase } = parsePanoURL(url);
     return this.load(id, zoom, { tileBase });
@@ -33,7 +34,9 @@ class GooglePhotoSphereLoader extends Loader {
   // `tileBase` overrides the tile endpoint for panoramas that aren't served
   // from lh3.ggpht.com/p/<id>. See parsePanoURL.
   async load(id, zoom = 1, { tileBase = null } = {}) {
-    const info = await getPhotoSphereInfo(id);
+    const signal = this.begin();
+    const info = await getPhotoSphereInfo(id, signal);
+    signal.throwIfAborted();
     this.panoId = id;
 
     const size = pick(info, [1, 0, 2, 2], id);
@@ -66,6 +69,19 @@ class GooglePhotoSphereLoader extends Loader {
     }
     this.zoom = zoom;
 
+    // Only the older AF1Qip… photo spheres are served from lh3.ggpht.com/p/<id>;
+    // photometa names the media the newer ones are served from.
+    if (!tileBase && !id.startsWith("AF1Qip")) {
+      tileBase = tryPick(info, [1, 0, 17, 0, 0])?.split("=")[0] ?? null;
+      if (!tileBase) {
+        throw new PanomNomError(
+          ErrorCodes.NEEDS_MAPS_URL,
+          `Photometa has no media URL for "${id}". Load it from its Google Maps URL ` +
+            `instead, copied once the photo sphere has loaded (it has a !6s… part).`
+        );
+      }
+    }
+
     const { tileSize } = this.metadata.tiles;
     const level = levels[zoom];
 
@@ -92,7 +108,7 @@ class GooglePhotoSphereLoader extends Loader {
       }
     }
 
-    return this.stitcher.process();
+    return this.stitcher.process(signal);
   }
 }
 

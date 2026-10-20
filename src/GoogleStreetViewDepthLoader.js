@@ -1,5 +1,5 @@
 import { PanomNomError, ErrorCodes } from "./errors.js";
-import { fetchPhotometa, pick, ENTITY_STREET_VIEW } from "./photometa.js";
+import { fetchPhotometa, tryPick, ENTITY_STREET_VIEW } from "./photometa.js";
 
 // Street View ships a coarse depth map as a set of planes plus a per-pixel
 // plane index. Pixels that belong to no plane (the sky) are Infinity.
@@ -70,6 +70,12 @@ function computeDepthMap(header, indices, planes) {
 
       if (planeIdx > 0) {
         const plane = planes[planeIdx];
+        if (!plane) {
+          throw new PanomNomError(
+            ErrorCodes.BAD_METADATA,
+            `Depth map pixel ${x},${y} points at plane ${planeIdx} of ${planes.length}`
+          );
+        }
         depthMap[y * w + (w - x - 1)] = Math.abs(
           plane.d / (v[0] * plane.n[0] + v[1] * plane.n[1] + v[2] * plane.n[2])
         );
@@ -94,7 +100,14 @@ class GoogleStreetViewDepthLoader {
     const json = await fetchPhotometa(panoId, ENTITY_STREET_VIEW);
 
     try {
-      const raw = pick(json, [1, 0, 5, 0, 5, 1, 2], panoId);
+      const raw = tryPick(json, [1, 0, 5, 0, 5, 1, 2]);
+      if (typeof raw !== "string") {
+        throw new PanomNomError(
+          ErrorCodes.BAD_METADATA,
+          `No depth map for "${panoId}". Some panoramas have none, and Google ` +
+            `sends none to headless browsers.`
+        );
+      }
       this.depthMap = this.parse(this.decode(raw));
     } catch (e) {
       if (!this.fallbackToEmpty) {

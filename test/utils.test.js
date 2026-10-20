@@ -123,6 +123,13 @@ test("decodePanoId unwraps a protobuf-wrapped photo sphere id", () => {
   });
 });
 
+test("decodePanoId accepts the dot padding getPanorama returns", () => {
+  assert.deepEqual(decodePanoId("CAoSFkNJSE0wb2dLRUlDQWdJREV5TV9hRFE."), {
+    kind: "photo-sphere",
+    id: "CIHM0ogKEICAgIDEyM_aDQ",
+  });
+});
+
 test("decodePanoId returns null for ordinary ids", () => {
   // These must not be mistaken for wrappers, or every load would misreport.
   for (const id of [
@@ -134,4 +141,28 @@ test("decodePanoId returns null for ordinary ids", () => {
   ]) {
     assert.equal(decodePanoId(id), null, id);
   }
+});
+
+test("parsePanoURL ignores a Street View thumbnail in !6s", () => {
+  const url = `https://www.google.com/maps/@51.53,-0.12,3a,75y/data=!3m7!1e1!3m5!1s${PANO}!2e0!6shttps:%2F%2Fstreetviewpixels-pa.googleapis.com%2Fv1%2Fthumbnail%3Fcb_client%3Dmaps_sv.tactile%26panoid%3D${PANO}!7i16384!8i8192`;
+  const { id, kind, tileBase } = parsePanoURL(url);
+  assert.equal(id, PANO);
+  assert.equal(kind, "street-view");
+  assert.equal(tileBase, null);
+});
+
+test("parsePanoURL reads a legacy ?panoid= URL, as getIdFromURL does", () => {
+  const { id, kind, tileBase } = parsePanoURL(
+    `https://maps.google.com/?ll=40.74,-73.98&panoid=${PANO}&cbp=12,208.53,,0,6.03`
+  );
+  assert.equal(id, PANO);
+  assert.equal(kind, null);
+  assert.equal(tileBase, null);
+});
+
+test("a malformed %-escape is NO_PANO_ID, not a bare URIError", () => {
+  assert.throws(
+    () => getIdFromURL("https://www.google.com/maps/@1,2/data=%E0%A4%A"),
+    (e) => e.code === ErrorCodes.NO_PANO_ID
+  );
 });

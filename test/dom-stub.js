@@ -8,6 +8,7 @@
 //   .../ratelimit           429 with a Retry-After of 1 second
 //   .../ratelimit-forever   429 with no Retry-After
 //   .../notimage            200, but the body will not decode
+//   .../notfound            404
 //
 // `loads` records every url requested, which is how tests assert that a failed
 // run stops fetching the remainder.
@@ -56,6 +57,7 @@ async function fakeFetch(url, { signal } = {}) {
     return fakeResponse(429, { headers: { "retry-after": "1" } });
   }
   if (url.includes("notimage")) return fakeResponse(200, { body: NOT_AN_IMAGE });
+  if (url.includes("notfound")) return fakeResponse(404);
 
   const flaky = url.match(/flaky-(\d+)/);
   if (flaky) {

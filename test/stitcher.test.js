@@ -236,3 +236,29 @@ test("decoded bitmaps are released after drawing", async () => {
   await s.process();
   assert.equal(canvas.getContext().drawn.length, 1);
 });
+
+test("a 404 fails at once instead of being retried", async () => {
+  const s = new Stitcher(new FakeCanvas());
+  s.addTileTask(tile("https://example.com/notfound-1"));
+
+  await assert.rejects(s.process(), (e) => e.code === ErrorCodes.NO_IMAGE && e.status === 404);
+  assert.equal(loads.filter((u) => u.includes("notfound-1")).length, 1);
+  assert.equal(s.retries, 0);
+});
+
+test("aborting the signal stops the run with the signal's reason", async () => {
+  const canvas = new FakeCanvas();
+  const s = new Stitcher(canvas, { concurrency: 1 });
+  for (let i = 0; i < 50; i++) s.addTileTask(tile(`https://example.com/ok-abort-${i}`));
+  const controller = new AbortController();
+  const reason = new Error("stop");
+
+  const run = s.process(controller.signal);
+  setTimeout(() => controller.abort(reason), 5);
+  await assert.rejects(run, (e) => e === reason);
+
+  const drawn = canvas.getContext().drawn.length;
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(drawn < 50, "expected the run to stop early");
+  assert.equal(canvas.getContext().drawn.length, drawn, "nothing may be drawn after the abort");
+});

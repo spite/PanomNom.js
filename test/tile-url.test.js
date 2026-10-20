@@ -14,6 +14,8 @@ globalThis.__realFetch = globalThis.fetch;
 
 // Returned by getIdByLocation: a base64 protobuf wrapping a photo sphere id.
 const WRAPPED_PHOTO_SPHERE = "CAoSF0NJSE0wb2dLRUlDQWdJREU4YjdNMndF";
+// The same kind of wrapper, padded with "." as getPanorama returns it.
+const DOT_PADDED_PHOTO_SPHERE = "CAoSFkNJSE0wb2dLRUlDQWdJREV5TV9hRFE.";
 const NO_TILE_URL_PANO = "legacyPanoWithoutGetTileUrl";
 
 const asked = [];
@@ -82,6 +84,10 @@ test("falls back to the Street View host for a plain id", async () => {
     loads.every((u) => u.includes("geo0.ggpht.com")),
     "a plain Street View id with no getTileUrl should use the legacy endpoint"
   );
+  assert.ok(
+    loads.every((u) => u.includes("cb_client=apiv3")),
+    "the legacy endpoint should be asked as the apiv3 client"
+  );
 });
 
 test("explains a wrapped photo sphere id it cannot fetch", async () => {
@@ -95,6 +101,22 @@ test("explains a wrapped photo sphere id it cannot fetch", async () => {
         assert.equal(e.code, ErrorCodes.BAD_METADATA);
         assert.match(e.message, /photo-sphere/);
         assert.match(e.message, /CIHM0ogKEICAgIDE8b7M2wE/);
+        return true;
+      }
+    );
+  } finally {
+    provideTileUrl = true;
+  }
+});
+
+test("explains a dot-padded photo sphere id too", async () => {
+  provideTileUrl = false;
+  try {
+    await assert.rejects(
+      new GoogleStreetViewLoader().load(DOT_PADDED_PHOTO_SPHERE, 1),
+      (e) => {
+        assert.equal(e.code, ErrorCodes.BAD_METADATA);
+        assert.match(e.message, /CIHM0ogKEICAgIDEyM_aDQ/);
         return true;
       }
     );

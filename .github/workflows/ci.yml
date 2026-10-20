@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       # npm ci, not npm install: the bundle check below compares against output
       # from one exact esbuild version, so the lockfile has to be honoured.
       - run: npm ci

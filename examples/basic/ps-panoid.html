@@ -2,150 +2,53 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>PanomNom.js Basic Usage</title>
-    <link
-      href="//fonts.googleapis.com/css?family=Roboto:400,700,300"
-      rel="stylesheet"
-      type="text/css"
-    />
-    <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: inherit;
-      }
-      body {
-        font: 12px/14px Roboto, tahoma, sans-serif;
-        padding: 10px;
-        box-sizing: border-box;
-        color: #202020;
-      }
-      section {
-        width: 800px;
-        margin: 0 auto;
-      }
-      h1 {
-        font-size: 24px;
-        line-height: 34px;
-        margin-bottom: 1em;
-      }
-      h2 {
-        font-size: 20px;
-        line-height: 28px;
-      }
-      canvas {
-        margin-top: 1em;
-        width: 100%;
-        position: absolute;
-        left: 0;
-        right: 0;
-      }
-      p {
-        margin-bottom: 1em;
-      }
-      #progressDiv {
-        color: #404040;
-      }
-      #messageDiv {
-        color: #808080;
-      }
-      #errorDiv {
-        color: #b70000;
-      }
-      #PanoIdForm {
-        margin-bottom: 1em;
-      }
-      #PanoIdInput {
-        width: 85%;
-        padding: 5px;
-      }
-      #PanoIdFormSubmit {
-        width: 10%;
-        padding: 5px;
-        border: none;
-        height: 2.4em;
-      }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Photo sphere from an id · PanomNom.js</title>
+    <link rel="stylesheet" href="demo.css" />
+    <script type="importmap">
+      { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+    </script>
   </head>
   <body>
-    <section>
-      <h1>PanomNom.js Basic Usage</h1>
-      <h2>GooglePhotoSphereLoader.load</h2>
-      <p>
-        This example shows how to set GooglePhotoSphereLoader to load from a
-        panoId.
-      </p>
-      <p><i>Try AF1QipMKVZBKb5dP2my1FWB2ljCp2vXqiISTzj056YD_</i></p>
-      <form id="PanoIdForm">
-        <input type="text" id="PanoIdInput" />
-        <input type="submit" id="PanoIdFormSubmit" />
-      </form>
-      <div id="progressDiv"></div>
-      <div id="messageDiv"></div>
-      <div id="errorDiv"></div>
-      <div id="canvasContainer"></div>
-    </section>
-
-    <script src="https://maps.google.com/maps/api/js"></script>
+    <main>
+      <nav><a href="./">← All examples</a> · <a href="https://github.com/spite/PanomNom.js/blob/master/examples/basic/ps-panoid.html">Source</a></nav>
+      <h1>Photo sphere from an id <code>GooglePhotoSphereLoader.load</code></h1>
+      <p>Loads a photo sphere from its id: an older <code>AF1Qip…</code> one, or a newer <code>CIHM0…</code> one, whose tiles the loader finds through photometa. The zoom levels available vary from one photo sphere to another, and a missing one is reported as <code>INVALID_ZOOM</code>.</p>
+      <div id="demo"></div>
+    </main>
     <script type="module">
       import { GooglePhotoSphereLoader } from "../../src/PanomNom.js";
-
-      var messageDiv = document.getElementById("messageDiv");
-      var errorDiv = document.getElementById("errorDiv");
-      var progressDiv = document.getElementById("progressDiv");
-      var canvasContainer = document.getElementById("canvasContainer");
-      var PanoIdInput = document.getElementById("PanoIdInput");
-      var PanoIdForm = document.getElementById("PanoIdForm");
-
-      function showError(message) {
-        errorDiv.innerHTML = message;
-      }
-
-      function showMessage(message) {
-        messageDiv.innerHTML = message;
-      }
-
-      function showProgress(message) {
-        progressDiv.innerHTML = message;
-      }
+      import { createDemo } from "./demo.js";
+      import { PHOTO_SPHERES } from "./places.js";
 
       // Photo spheres are often shot by members of the public, so credit the
-      // author as well as the copyright holder.
-      function attribution({ copyright, author, authorURL }) {
-        const who = authorURL
-          ? `<a href="https:${authorURL}">${author}</a>`
-          : author;
-        return [copyright, who ? `Photo by ${who}` : null]
-          .filter(Boolean)
-          .join(" &middot; ");
-      }
-
-      async function load(id) {
-        showMessage("");
-        try {
-          showProgress(`Loading ${id}`);
-          await loader.load(id, 3);
-
-          showProgress("Finished.");
-          showError("");
-          canvasContainer.appendChild(loader.canvas);
-          showMessage(attribution(loader.metadata));
-        } catch (e) {
-          showError(e.message);
+      // author as well as the copyright holder. Built as nodes, since the author
+      // chooses their own name.
+      function credit({ copyright, author, authorURL }) {
+        const line = document.createDocumentFragment();
+        if (copyright) line.append(copyright);
+        if (author) {
+          if (copyright) line.append(" · ");
+          const link = authorURL?.startsWith("//");
+          const who = document.createElement(link ? "a" : "span");
+          if (link) who.href = `https:${authorURL}`;
+          who.textContent = author;
+          line.append("Photo by ", who);
         }
+        return line;
       }
-
-      showProgress("Starting.");
 
       const loader = new GooglePhotoSphereLoader();
 
-      loader.onProgress((p) => {
-        showProgress("Loaded " + p.toFixed(0) + "%");
-      });
-
-      PanoIdForm.addEventListener("submit", (e) => {
-        load(PanoIdInput.value);
-        e.preventDefault();
+      createDemo({
+        label: "Photo sphere id",
+        placeholder: "AF1Qip…",
+        examples: [...PHOTO_SPHERES, ["AF1QipMKVZBKb5dP2my1FWB2ljCp2vXqiISTzj056YD_", "An older one"]],
+        async load(id, { zoom, progress }) {
+          loader.onProgress(progress);
+          await loader.load(id, zoom);
+          return { canvas: loader.canvas, credit: credit(loader.metadata), name: id };
+        },
       });
     </script>
   </body>

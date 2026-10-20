@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "build": "bash tools/build.sh",
-    "test": "node --test test/",
+    "test": "node --test test/*.test.js",
     "check": "for f in src/*.js; do node --check \"$f\" || exit 1; done"
   },
   "keywords": [
