@@ -21,6 +21,9 @@ const STUB_PANO = "KGh2_8m7l_ikrgaYrAAFeA";
 // A short-form Street View id. Ids in this shape are often mistaken for photo
 // sphere ids, which is why it is tested against both loaders.
 const SHORT_FORM_PANO = "4avA1iH-YV3U2s2rK12tqA";
+// Google filters some tile requests by user agent; headless Chrome is the one capture tools send.
+const HEADLESS_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36";
 
 // Fetches tiles for real, but records them so tests can assert on the grid.
 function installFetchingImage() {
@@ -113,7 +116,7 @@ test("depth loader reports a typed error for a panorama with no depth", opts, as
     new GoogleStreetViewDepthLoader().load(STUB_PANO),
     (e) => {
       assert.equal(e.code, ErrorCodes.BAD_METADATA);
-      assert.match(e.message, /photometa shape/);
+      assert.match(e.message, /No depth map/);
       return true;
     }
   );
@@ -200,6 +203,26 @@ test("street view loader stitches a live tile grid", opts, async () => {
     assert.equal(progress, 100, `zoom ${zoom} should finish at 100%`);
     assert.equal(failures.length, 0, `tiles failed: ${failures.join(", ")}`);
   }
+});
+
+test("street view tiles are served to headless browsers", opts, async () => {
+  const failures = installFetchingImage();
+  await stubMapsFromPhotometa(SV_PANO);
+
+  const fetchingImage = globalThis.fetch;
+  globalThis.fetch = (url, init) =>
+    fetchingImage(url, { ...init, headers: { "user-agent": HEADLESS_UA } });
+
+  const { GoogleStreetViewLoader } = await import(
+    "../src/GoogleStreetViewLoader.js"
+  );
+
+  try {
+    await new GoogleStreetViewLoader().load(SV_PANO, 1);
+  } finally {
+    globalThis.fetch = fetchingImage;
+  }
+  assert.equal(failures.length, 0, `tiles failed: ${failures.join(", ")}`);
 });
 
 test("street view loader rejects an out-of-range zoom", opts, async () => {
@@ -308,8 +331,7 @@ test("hardcoded 26-wide grid matches the pyramid Google reports", opts, async ()
 });
 
 // A photo sphere whose tiles come from an opaque googleusercontent media id
-// rather than lh3.ggpht.com/p/<id>. The media id exists only in the Maps URL:
-// it is absent from the photometa response and from the Maps page HTML.
+// rather than lh3.ggpht.com/p/<id>, taken here from the !6s part of its Maps URL.
 // Media ids stop working after a while: when these tiles 403, reopen each link in Maps and copy the new one.
 const MODERN_PS_URL =
   "https://www.google.com/maps/@51.5315636,-0.1242444,3a,75y,84.63h,92.54t/data=!3m8!1e1!3m6!1sCIHM0ogKEICAgIDq8-jQcQ!2e10!3e11!6shttps:%2F%2Flh3.googleusercontent.com%2Fgpms-cs-s%2FAM4Q-U_-1wk9FGVbKKFdS4yHyuHQMss9KMFfiz8_RdYJRK6jQCl_plkjdhrDKR2QX623xiyFCRy4xQFTnzHw9uAUtppb4vej-zewVFwFZ8jPM1u_WoYAPmkFnA5aTOgmVXG20tET-BwD%3Dw900-h600-k-no-pi-2.5440472982150624-ya357.625233030754-ro0-fo100!7i12288!8i3982?entry=ttu&g_ep=EgoyMDI2MDcyNy4wIKXMDSoASAFQAw%3D%3D";
@@ -336,21 +358,20 @@ test("photo sphere with a media-id tile base loads via loadFromURL", opts, async
   assert.equal(loads.length, 3);
 });
 
-test("the same photo sphere fails without the media-id tile base", opts, async () => {
-  const failures = installFetchingImage();
+test("the same photo sphere loads from its id alone, through photometa's media URL", opts, async () => {
+  installFetchingImage();
   delete globalThis.google;
 
   const { GooglePhotoSphereLoader } = await import(
     "../src/GooglePhotoSphereLoader.js"
   );
-  const { ErrorCodes } = await import("../src/errors.js");
 
-  // Same panorama, legacy lh3.ggpht.com/p/<id> URL: 400s for this generation.
-  await assert.rejects(
-    new GooglePhotoSphereLoader().load("CIHM0ogKEICAgIDq8-jQcQ", 0),
-    (e) => e.code === ErrorCodes.NO_IMAGE
-  );
-  assert.ok(failures.length > 0, "expected the legacy tile URL to fail");
+  const loader = new GooglePhotoSphereLoader();
+  loads.length = 0;
+  await loader.load("CIHM0ogKEICAgIDq8-jQcQ", 0);
+  const tiles = loads.filter((u) => !u.includes("/photometa/"));
+  assert.equal(tiles.length, 1);
+  assert.ok(tiles[0].startsWith("https://lh3.googleusercontent.com/gpms-cs-s/"));
 });
 
 // A second media-id photo sphere, and a better grid case than the first: its
@@ -445,9 +466,8 @@ test("place URL photo sphere loads, including partial edge tiles", opts, async (
   }
 });
 
-// The ps-url example previously did getIdFromURL + load(id), which discards the
-// !6s media id and so cannot fetch a modern photo sphere's tiles at all.
-test("loadFromURL succeeds where load(getIdFromURL(url)) cannot", opts, async () => {
+// The media id in the URL and the one photometa reports both reach the tiles.
+test("loadFromURL and load(getIdFromURL(url)) both load a modern photo sphere", opts, async () => {
   installFetchingImage();
   delete globalThis.google;
 
@@ -455,16 +475,8 @@ test("loadFromURL succeeds where load(getIdFromURL(url)) cannot", opts, async ()
     "../src/GooglePhotoSphereLoader.js"
   );
   const { getIdFromURL } = await import("../src/utils.js");
-  const { ErrorCodes } = await import("../src/errors.js");
 
-  const id = getIdFromURL(PLACE_PS_URL);
-
-  // The id alone routes to lh3.ggpht.com/p/<id>, which 400s for this
-  // generation of photo sphere.
-  await assert.rejects(
-    new GooglePhotoSphereLoader().load(id, 0),
-    (e) => e.code === ErrorCodes.NO_IMAGE
-  );
+  await new GooglePhotoSphereLoader().load(getIdFromURL(PLACE_PS_URL), 0);
 
   // The same panorama, reached through its URL.
   const loader = new GooglePhotoSphereLoader();

@@ -37,9 +37,11 @@ class GoogleStreetViewLoader extends Loader {
   // zoom is an index into the tile pyramid: 0 is a single tile, 5 is full
   // resolution.
   async load(id, zoom = 1) {
+    const signal = this.begin();
     const metadata = hasGoogleMaps()
       ? await getPanoramaById(id)
-      : await getStreetViewMetadata(id);
+      : await getStreetViewMetadata(id, signal);
+    signal.throwIfAborted();
     this.metadata = metadata;
     this.panoId = id;
 
@@ -77,17 +79,18 @@ class GoogleStreetViewLoader extends Loader {
         throw new PanomNomError(
           ErrorCodes.BAD_METADATA,
           `"${id}" is a ${wrapped.kind} (${wrapped.id}), not a Street View panorama. ` +
-            `Its tiles are not served from the Street View endpoint — use ` +
-            `GooglePhotoSphereLoader.loadFromURL with its Maps URL instead.`
+            `Its tiles are not served from the Street View endpoint — load ` +
+            `"${wrapped.id}" with GooglePhotoSphereLoader instead.`
         );
       }
     }
 
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
+        // maps_sv.tactile is refused to headless browsers and curl; apiv3 is not.
         const url = getTileUrl
           ? getTileUrl(x, y)
-          : `https://geo0.ggpht.com/cbk?cb_client=maps_sv.tactile&authuser=0&hl=en&panoid=${id}&output=tile&x=${x}&y=${y}&zoom=${zoom}&nbt&fover=2`;
+          : `https://geo0.ggpht.com/cbk?cb_client=apiv3&authuser=0&hl=en&panoid=${id}&output=tile&x=${x}&y=${y}&zoom=${zoom}&nbt&fover=2`;
 
         this.stitcher.addTileTask({
           url,
@@ -99,7 +102,7 @@ class GoogleStreetViewLoader extends Loader {
       }
     }
 
-    return this.stitcher.process();
+    return this.stitcher.process(signal);
   }
 }
 

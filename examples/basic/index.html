@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Examples · PanomNom.js</title>
+    <link rel="stylesheet" href="demo.css" />
+    <style>
+      ul {
+        list-style: none;
+        padding: 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 12px;
+      }
+      li a {
+        display: block;
+        height: 100%;
+        padding: 12px 14px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+        color: inherit;
+        text-decoration: none;
+      }
+      li a:hover {
+        border-color: var(--accent);
+      }
+      li strong {
+        display: block;
+        color: var(--accent);
+      }
+      li code {
+        color: var(--muted);
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <nav><a href="https://github.com/spite/PanomNom.js">PanomNom.js on GitHub</a></nav>
+      <h1>PanomNom.js examples</h1>
+      <p>Each one loads a panorama with the library and shows it in 360°, flat, or as a download.</p>
+      <ul>
+        <li><a href="sv-panoid.html"><strong>Street View from an id</strong><code>GoogleStreetViewLoader.load</code></a></li>
+        <li><a href="sv-location.html"><strong>Street View from a location</strong><code>getIdByLocation</code>, with a map to click</a></li>
+        <li><a href="sv-url.html"><strong>Street View from a Maps URL</strong><code>getIdFromURL</code></a></li>
+        <li><a href="sv-depth.html"><strong>Street View depth</strong><code>GoogleStreetViewDepthLoader</code>, in 3D</a></li>
+        <li><a href="ps-panoid.html"><strong>Photo sphere from an id</strong><code>GooglePhotoSphereLoader.load</code></a></li>
+        <li><a href="ps-url.html"><strong>Photo sphere from a Maps URL</strong><code>GooglePhotoSphereLoader.loadFromURL</code></a></li>
+        <li><a href="bundle.html"><strong>Using the built bundle</strong><code>build/PanomNom.module.js</code></a></li>
+        <li><a href="https://spite.github.io/FloatingShinyKnot/"><strong>Floating Shiny Knot</strong>A complete example, with a map and more</a></li>
+      </ul>
+    </main>
+  </body>
+</html>

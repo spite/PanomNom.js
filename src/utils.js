@@ -49,14 +49,19 @@ async function getPanoramaById(id) {
   }
 }
 
-async function getIdByLocation(lat, lon) {
+// Official outdoor panoramas by default; "outdoor" alone adds photo spheres.
+async function getIdByLocation(
+  lat,
+  lon,
+  { radius = 50, sources = ["google", "outdoor"] } = {}
+) {
   const service = getGoogleStreetViewService();
   const latLng = new google.maps.LatLng(lat, lon);
   try {
     return await service.getPanorama({
       location: latLng,
-      radius: 50,
-      source: "outdoor",
+      radius,
+      sources,
     });
   } catch (e) {
     throw new PanomNomError(
@@ -90,11 +95,12 @@ const ENTITY_KINDS = { 0: "street-view", 10: "photo-sphere" };
 // Feeding the wrapper to a tile endpoint fails, so unwrap it to find out what
 // the id actually refers to.
 function decodePanoId(id) {
-  if (!/^[A-Za-z0-9_-]+$/.test(id)) return null;
+  // Google pads this web-safe base64 with "." instead of "=".
+  if (!/^[A-Za-z0-9_-]+\.*$/.test(id)) return null;
 
   let bytes;
   try {
-    const b64 = id.replace(/-/g, "+").replace(/_/g, "/");
+    const b64 = id.replace(/\.+$/, "").replace(/-/g, "+").replace(/_/g, "/");
     const binary = atob(b64.padEnd(Math.ceil(b64.length / 4) * 4, "="));
     bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
   } catch {
@@ -126,51 +132,72 @@ function findPanoToken(decoded) {
   return bare ? { id: bare[1], kind: null } : null;
 }
 
+// A malformed %-escape makes decodeURIComponent throw a URIError.
+function decodeURL(url) {
+  try {
+    return decodeURIComponent(url);
+  } catch (e) {
+    throw new PanomNomError(
+      ErrorCodes.NO_PANO_ID,
+      `Can't read the URL: it has a malformed %-escape`,
+      { cause: e }
+    );
+  }
+}
+
+// Street View URLs carry a thumbnail in !6s instead, which serves no tiles, so
+// only a googleusercontent media URL counts.
+function findTileBase(decoded) {
+  const candidate = decoded.match(/!6s(https?:\/\/[^!]+)/)?.[1];
+  if (!candidate) return null;
+  let host;
+  try {
+    host = new URL(candidate).hostname;
+  } catch {
+    return null;
+  }
+  if (!/(^|\.)googleusercontent\.com$/.test(host)) return null;
+  // Everything after "=" is the sizing suffix, which we replace per tile.
+  return candidate.split("=")[0];
+}
+
 // Maps data URLs are a flat list of "!<index><type><value>" tokens:
 //
 //   !1s<panoId>  the panorama id
 //   !2e<kind>    0 for Street View, 10 for a photo sphere
 //   !6s<url>     a thumbnail whose base doubles as the tile endpoint
 //
-// Newer photo spheres are served from an opaque googleusercontent media id that
-// appears only in !6s — it cannot be derived from the panorama id, so a URL is
-// the only way to reach them.
+// Newer photo spheres are served from an opaque googleusercontent media id. Maps
+// puts it in !6s once the photo sphere has loaded; photometa reports it too.
+//
+// Older links put the id in a query string instead:
+//
+//   https://maps.google.com/?ll=40.741352,-73.986096&cbll=40.741825,-73.986315&panoid=NOMYgwQ4YfVqMJogsbMcrg&cbp=12,208.53,,0,6.03
 function parsePanoURL(url) {
-  const decoded = decodeURIComponent(url);
+  const decoded = decodeURL(url);
 
+  // A !1s…!2e… pair is the panorama itself; a panoid= can belong to the
+  // thumbnail embedded in !6s, and runs on into the next "!" token.
   const token = findPanoToken(decoded);
-  if (!token) {
+  const fromQuery = getQueryVariable(decoded, "panoid")?.split("!")[0];
+  const id = (token?.kind != null && token.id) || fromQuery || token?.id;
+  if (!id) {
     throw new PanomNomError(
       ErrorCodes.NO_PANO_ID,
       `Can't find panorama id in specified URL`
     );
   }
 
-  // Everything after "=" is the sizing suffix, which we replace per tile.
-  const tileBase = decoded.match(/!6s(https?:\/\/[^!]+)/)?.[1]?.split("=")[0];
-
   return {
-    id: token.id,
-    kind: ENTITY_KINDS[token.kind] ?? null,
-    tileBase: tileBase ?? null,
+    id,
+    kind: token?.id === id ? (ENTITY_KINDS[token.kind] ?? null) : null,
+    tileBase: findTileBase(decoded),
   };
 }
 
+// https://www.google.com/maps/@51.5316182,-0.125108,3a,75y/data=!3m6!1e1!3m4!1skCisB_W6mNaYBgdxg0AX8A!2e0!7i16384!8i8192
 function getIdFromURL(url) {
-  const decoded = decodeURIComponent(url);
-
-  // https://maps.google.com/?ll=40.741352,-73.986096&cbll=40.741825,-73.986315&panoid=NOMYgwQ4YfVqMJogsbMcrg&cbp=12,208.53,,0,6.03
-  const fromQuery = getQueryVariable(decoded, "panoid");
-  if (fromQuery) return fromQuery;
-
-  // https://www.google.com/maps/@51.5316182,-0.125108,3a,75y/data=!3m6!1e1!3m4!1skCisB_W6mNaYBgdxg0AX8A!2e0!7i16384!8i8192
-  const token = findPanoToken(decoded);
-  if (token?.id) return token.id;
-
-  throw new PanomNomError(
-    ErrorCodes.NO_PANO_ID,
-    `Can't find panorama id in specified URL`
-  );
+  return parsePanoURL(url).id;
 }
 
 // The service getters stay module-private: they are plumbing, and exporting

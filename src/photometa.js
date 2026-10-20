@@ -2,7 +2,8 @@ import { PanomNomError, ErrorCodes } from "./errors.js";
 
 // Undocumented endpoint used by Google Maps itself. The `pb` value is a
 // serialised protobuf; the only part that varies between the panorama types is
-// the entity kind in `!3m3!1m2!1e<KIND>!2s<ID>`.
+// the entity kind in `!3m3!1m2!1e<KIND>!2s<ID>`. `!1e17` asks for a photo
+// sphere's media URL, which is where the newer ones serve their tiles from.
 const ENTITY_STREET_VIEW = 2;
 const ENTITY_PHOTO_SPHERE = 10;
 
@@ -11,15 +12,25 @@ function photometaURL(id, kind) {
     `https://www.google.com/maps/photometa/v1?authuser=0&hl=en&gl=uk&pb=` +
     `!1m4!1smaps_sv.tactile!11m2!2m1!1b1!2m2!1sen!2suk` +
     `!3m3!1m2!1e${kind}!2s${id}` +
-    `!4m57!1e1!1e2!1e3!1e4!1e5!1e6!1e8!1e12!2m1!1e1!4m1!1i48!5m1!1e1!5m1!1e2` +
+    `!4m61!1e1!1e2!1e3!1e4!1e5!1e6!1e8!1e12!1e17!2m1!1e1!4m1!1i48!5m1!1e1!5m1!1e2` +
     `!6m1!1e1!6m1!1e2!9m36!1m3!1e2!2b1!3e2!1m3!1e2!2b0!3e3!1m3!1e3!2b1!3e2` +
     `!1m3!1e3!2b0!3e3!1m3!1e8!2b0!3e3!1m3!1e1!2b0!3e3!1m3!1e4!2b0!3e3` +
-    `!1m3!1e10!2b1!3e2!1m3!1e10!2b0!3e3`
+    `!1m3!1e10!2b1!3e2!1m3!1e10!2b0!3e3!11m2!3m1!4b1`
   );
 }
 
-async function fetchPhotometa(id, kind) {
-  const res = await fetch(photometaURL(id, kind));
+async function fetchPhotometa(id, kind, signal) {
+  let res;
+  try {
+    res = await fetch(photometaURL(id, kind), { signal });
+  } catch (e) {
+    if (signal?.aborted) throw signal.reason;
+    throw new PanomNomError(
+      ErrorCodes.NETWORK,
+      `photometa request for "${id}" did not reach Google`,
+      { cause: e }
+    );
+  }
   if (!res.ok) {
     throw new PanomNomError(
       ErrorCodes.BAD_METADATA,
@@ -92,8 +103,8 @@ function extractAttribution(info) {
 // remote code, and anywhere you would rather not pull in the whole Maps SDK.
 // The one thing it cannot supply is getTileUrl, so callers fall back to
 // building tile URLs themselves.
-async function getStreetViewMetadata(id) {
-  const info = await fetchPhotometa(id, ENTITY_STREET_VIEW);
+async function getStreetViewMetadata(id, signal) {
+  const info = await fetchPhotometa(id, ENTITY_STREET_VIEW, signal);
   const size = pick(info, [1, 0, 2, 2], id);
   const tile = pick(info, [1, 0, 2, 3, 1], id);
 

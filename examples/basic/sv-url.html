@@ -2,157 +2,41 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>PanomNom.js Basic Usage</title>
-    <link
-      href="//fonts.googleapis.com/css?family=Roboto:400,700,300"
-      rel="stylesheet"
-      type="text/css"
-    />
-    <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: inherit;
-      }
-      body {
-        font: 12px/14px Roboto, tahoma, sans-serif;
-        padding: 10px;
-        box-sizing: border-box;
-        color: #202020;
-      }
-      section {
-        width: 800px;
-        margin: 0 auto;
-      }
-      h1 {
-        font-size: 24px;
-        line-height: 34px;
-        margin-bottom: 1em;
-      }
-      h2 {
-        font-size: 20px;
-        line-height: 28px;
-      }
-      canvas {
-        margin-top: 1em;
-        width: 100%;
-        position: absolute;
-        left: 0;
-        right: 0;
-      }
-      p {
-        margin-bottom: 1em;
-      }
-      #progressDiv {
-        color: #404040;
-      }
-      #messageDiv {
-        color: #808080;
-      }
-      #errorDiv {
-        color: #b70000;
-      }
-      #URLForm {
-        margin-bottom: 1em;
-      }
-      #URLInput {
-        width: 85%;
-        padding: 5px;
-      }
-      #URLFormSubmit {
-        width: 10%;
-        padding: 5px;
-        border: none;
-        height: 2.4em;
-      }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Street View from a Maps URL · PanomNom.js</title>
+    <link rel="stylesheet" href="demo.css" />
+    <script type="importmap">
+      { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+    </script>
   </head>
   <body>
-    <section>
-      <h1>PanomNom.js Basic Usage</h1>
-      <h2>GoogleStreetViewLoader.load + getIdFromURL</h2>
-      <p>
-        This example shows how to set GoogleStreetViewLoader to load from a
-        google maps URL.
-      </p>
-      <p style="overflow: auto">
-        <i
-          >Try
-          https://www.google.com/maps/@51.5316182,-0.125108,3a,75y,158.01h,90t/data=!3m6!1e1!3m4!1skCisB_W6mNaYBgdxg0AX8A!2e0!7i16384!8i8192</i
-        >
-      </p>
-      <form id="URLForm">
-        <input type="text" id="URLInput" />
-        <input type="submit" id="URLFormSubmit" />
-      </form>
-      <div id="progressDiv"></div>
-      <div id="messageDiv"></div>
-      <div id="errorDiv"></div>
-      <div id="canvasContainer"></div>
-    </section>
+    <main>
+      <nav><a href="./">← All examples</a> · <a href="https://github.com/spite/PanomNom.js/blob/master/examples/basic/sv-url.html">Source</a></nav>
+      <h1>Street View from a Maps URL <code>getIdFromURL</code></h1>
+      <p>Open Street View in Google Maps and paste the address: <code>getIdFromURL</code> finds the panorama id in it, and the loader does the rest.</p>
+      <div id="demo"></div>
+    </main>
     <script src="https://maps.google.com/maps/api/js"></script>
     <script type="module">
-      import {
-        GoogleStreetViewLoader,
-        getIdFromURL,
-      } from "../../src/PanomNom.js";
+      import { GoogleStreetViewLoader, getIdFromURL } from "../../src/PanomNom.js";
+      import { createDemo } from "./demo.js";
+      import { PANORAMAS, mapsURL } from "./places.js";
 
-      var messageDiv = document.getElementById("messageDiv");
-      var errorDiv = document.getElementById("errorDiv");
-      var progressDiv = document.getElementById("progressDiv");
-      var canvasContainer = document.getElementById("canvasContainer");
-      var URLInput = document.getElementById("URLInput");
-      var URLForm = document.getElementById("URLForm");
-
-      function showError(message) {
-        errorDiv.innerHTML = message;
-      }
-
-      function showMessage(message) {
-        messageDiv.innerHTML = message;
-      }
-
-      function showProgress(message) {
-        progressDiv.innerHTML = message;
-      }
-
-      async function load(url) {
-        showMessage("");
-        try {
-          const id = getIdFromURL(url);
-          showProgress(`Loading ${id}`);
-          await loader.load(id, 3);
-
-          showProgress("Finished.");
-          showError("");
-          canvasContainer.appendChild(loader.canvas);
-          showMessage(
-            "Panorama loaded, street view data " +
-              loader.metadata.copyright +
-              ".<br/>"
-          );
-        } catch (e) {
-          showError(
-            e.code === "ZERO_RESULTS"
-              ? "No results"
-              : e.code === "NO_IMAGE"
-              ? "Could not load image."
-              : e.message
-          );
-        }
-      }
-
-      showProgress("Starting.");
+      // Street View imagery belongs to Google, and the metadata says so.
+      const credit = (metadata) => `Street View data ${metadata.copyright}`;
 
       const loader = new GoogleStreetViewLoader();
 
-      loader.onProgress((p) => {
-        showProgress("Loaded " + p.toFixed(0) + "%");
-      });
-
-      URLForm.addEventListener("submit", (e) => {
-        load(URLInput.value);
-        e.preventDefault();
+      createDemo({
+        label: "Google Maps URL",
+        placeholder: "https://www.google.com/maps/@…",
+        examples: PANORAMAS.map((p) => [mapsURL(p), p[1]]),
+        async load(url, { zoom, progress }) {
+          const id = getIdFromURL(url);
+          loader.onProgress(progress);
+          await loader.load(id, zoom);
+          return { canvas: loader.canvas, credit: credit(loader.metadata), name: id };
+        },
       });
     </script>
   </body>

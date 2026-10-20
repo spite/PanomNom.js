@@ -42,7 +42,8 @@ function parseRetryAfter(value) {
 async function loadTile(task, signal) {
   let res;
   try {
-    res = await fetch(task.url, { mode: "cors", signal });
+    // googleusercontent.com answers 429 to pages on localhost, judging by the referrer alone.
+    res = await fetch(task.url, { mode: "cors", referrerPolicy: "no-referrer", signal });
   } catch (e) {
     if (signal.aborted) throw signal.reason ?? e;
     throw new PanomNomError(
@@ -63,10 +64,12 @@ async function loadTile(task, signal) {
   }
 
   if (!res.ok) {
-    throw new PanomNomError(
+    const error = new PanomNomError(
       ErrorCodes.NO_IMAGE,
       `Could not load tile ${task.url} (HTTP ${res.status})`
     );
+    error.status = res.status;
+    throw error;
   }
 
   try {
@@ -112,8 +115,9 @@ class Stitcher {
   }
 
   // Consumes the queued tasks and draws them onto the canvas. Always starts
-  // from a clean slate, so a Stitcher can be reused across loads.
-  async process() {
+  // from a clean slate, so a Stitcher can be reused across loads. Aborting
+  // `signal` stops the run, which then rejects with the signal's reason.
+  async process(signal) {
     const tasks = this.queue.slice();
     this.reset();
 
@@ -131,6 +135,9 @@ class Stitcher {
     // One failure aborts the whole run: there is no point downloading the rest
     // of a panorama that cannot be completed.
     const controller = new AbortController();
+    if (signal?.aborted) throw signal.reason;
+    const onAbort = () => controller.abort(signal.reason);
+    signal?.addEventListener("abort", onAbort, { once: true });
     let next = 0;
 
     const loadTileWithRetry = async (task) => {
@@ -149,6 +156,9 @@ class Stitcher {
             continue;
           }
 
+          // A 4xx other than 429 won't change on a retry: the tile is missing or refused.
+          if (e.status >= 400 && e.status < 500) throw e;
+
           this.retries++;
           await sleep(retryDelay(attempt));
         }
@@ -159,6 +169,10 @@ class Stitcher {
       while (next < tasks.length && !controller.signal.aborted) {
         const task = tasks[next++];
         const bitmap = await loadTileWithRetry(task);
+        if (controller.signal.aborted) {
+          bitmap.close?.();
+          return;
+        }
         this.ctx.drawImage(
           bitmap,
           0,
@@ -189,7 +203,11 @@ class Stitcher {
       controller.abort(e);
       await Promise.allSettled(workers);
       throw e;
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
     }
+    // Workers that saw the abort between tiles return quietly, so check here too.
+    if (controller.signal.aborted) throw controller.signal.reason;
 
     return true;
   }

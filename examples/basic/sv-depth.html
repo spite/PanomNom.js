@@ -2,180 +2,177 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>PanomNom.js Basic Usage</title>
-    <link
-      href="//fonts.googleapis.com/css?family=Roboto:400,700,300"
-      rel="stylesheet"
-      type="text/css"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Street View depth · PanomNom.js</title>
+    <link rel="stylesheet" href="demo.css" />
     <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: inherit;
+      .readout {
+        position: absolute;
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        font-size: 12px;
+        pointer-events: none;
+        transform: translate(12px, -50%);
       }
-      body {
-        font: 12px/14px Roboto, tahoma, sans-serif;
-        padding: 10px;
-        box-sizing: border-box;
-        color: #202020;
-      }
-      section {
-        width: 800px;
-        margin: 0 auto;
-      }
-      h1 {
-        font-size: 24px;
-        line-height: 34px;
-        margin-bottom: 1em;
-      }
-      h2 {
-        font-size: 20px;
-        line-height: 28px;
-      }
-      canvas {
-        margin-top: 1em;
-        width: 100%;
-        /* position: absolute; */
-        left: 0;
-        right: 0;
-      }
-      p {
-        margin-bottom: 1em;
-      }
-      #progressDiv {
-        color: #404040;
-      }
-      #messageDiv {
-        color: #808080;
-      }
-      #errorDiv {
-        color: #b70000;
-      }
-      #PanoIdForm {
-        margin-bottom: 1em;
-      }
-      #PanoIdInput {
-        width: 85%;
-        padding: 5px;
-      }
-      #PanoIdFormSubmit {
-        width: 10%;
-        padding: 5px;
-        border: none;
-        height: 2.4em;
+      .flat:not([hidden]) {
+        display: grid;
       }
     </style>
+    <script type="importmap">
+      { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+    </script>
   </head>
   <body>
-    <section>
-      <h1>PanomNom.js Basic Usage</h1>
-      <h2>GoogleStreetViewLoader.load</h2>
-      <p>
-        This example shows how to set GoogleStreetViewLoader to load from a
-        panoId.
-      </p>
-      <p><i>Try kCisB_W6mNaYBgdxg0AX8A</i></p>
-      <form id="PanoIdForm">
-        <input type="text" id="PanoIdInput" />
-        <input type="submit" id="PanoIdFormSubmit" />
-      </form>
-      <div id="progressDiv"></div>
-      <div id="messageDiv"></div>
-      <div id="errorDiv"></div>
-      <div id="canvasContainer"></div>
-    </section>
+    <main>
+      <nav><a href="./">← All examples</a> · <a href="https://github.com/spite/PanomNom.js/blob/master/examples/basic/sv-depth.html">Source</a></nav>
+      <h1>Street View depth <code>GoogleStreetViewDepthLoader</code></h1>
+      <p>Loads the depth map of a panorama: the distance in metres to the planes Google fitted to the scene, with the sky at <code>Infinity</code>. In 360°, the sphere is pushed out to those distances, and the camera sways a little so you can see the parallax. Flat, the depth map is shown below the panorama: hover it to read the distances. Not every panorama has one: those show as a plain sphere.</p>
+      <div id="demo"></div>
+    </main>
     <script src="https://maps.google.com/maps/api/js"></script>
     <script type="module">
-      import {
-        GoogleStreetViewLoader,
-        GoogleStreetViewDepthLoader,
-      } from "../../src/PanomNom.js";
+      import { SphereGeometry, CanvasTexture, SRGBColorSpace } from "three";
+      import { GoogleStreetViewLoader, GoogleStreetViewDepthLoader } from "../../src/PanomNom.js";
+      import { createDemo } from "./demo.js";
+      import { PANORAMAS } from "./places.js";
 
-      var messageDiv = document.getElementById("messageDiv");
-      var errorDiv = document.getElementById("errorDiv");
-      var progressDiv = document.getElementById("progressDiv");
-      var canvasContainer = document.getElementById("canvasContainer");
-      var PanoIdInput = document.getElementById("PanoIdInput");
-      var PanoIdForm = document.getElementById("PanoIdForm");
+      // Where the sky goes, and the furthest depth worth telling apart.
+      const SKY = 200;
+      const FAR = 100;
 
-      function showError(message) {
-        errorDiv.innerHTML = message;
+      // Google's Turbo colormap, near red to far blue, as a polynomial fit.
+      function turbo(t) {
+        const r = 0.1357 + t * (4.5974 - t * (42.3277 - t * (130.5887 - t * (150.5666 - t * 58.1375))));
+        const g = 0.0914 + t * (2.1856 + t * (4.8052 - t * (14.0195 - t * (4.2109 + t * 2.7747))));
+        const b = 0.1067 + t * (12.5925 - t * (60.1097 - t * (109.0745 - t * (88.5066 - t * 26.8183))));
+        return [r, g, b].map((c) => Math.round(255 * Math.min(1, Math.max(0, c))));
       }
 
-      function showMessage(message) {
-        messageDiv.innerHTML = message;
-      }
-
-      function showProgress(message) {
-        progressDiv.innerHTML = message;
-      }
-
-      showProgress("Starting.");
-
-      // Depths are metres, and the sky is Infinity, so they have to be scaled
-      // into 0-255 to be visible at all.
-      function drawDepthMap(res) {
+      // Depths on a log scale, so nearby detail isn't lost to the far end.
+      function drawDepthMap({ width, height, depthMap }) {
         const canvas = document.createElement("canvas");
-        canvas.width = res.width;
-        canvas.height = res.height;
+        canvas.width = width;
+        canvas.height = height;
         const ctx = canvas.getContext("2d");
-        const imageData = ctx.createImageData(canvas.width, canvas.height);
-
-        let max = 0;
-        for (const d of res.depthMap) {
-          if (Number.isFinite(d) && d > max) max = d;
+        const image = ctx.createImageData(width, height);
+        for (let i = 0; i < depthMap.length; i++) {
+          const d = depthMap[i];
+          const [r, g, b] = Number.isFinite(d)
+            ? turbo(1 - Math.log(Math.max(d, 1)) / Math.log(FAR))
+            : [16, 16, 24];
+          image.data.set([r, g, b, 255], i * 4);
         }
-
-        for (let i = 0; i < res.depthMap.length; i++) {
-          const d = res.depthMap[i];
-          const c = Number.isFinite(d) ? Math.round((d / max) * 255) : 255;
-          imageData.data[i * 4] = c;
-          imageData.data[i * 4 + 1] = c;
-          imageData.data[i * 4 + 2] = c;
-          imageData.data[i * 4 + 3] = 255;
-        }
-        ctx.putImageData(imageData, 0, 0);
-        canvasContainer.append(canvas);
+        ctx.putImageData(image, 0, 0);
+        return canvas;
       }
 
-      async function load(id) {
-        showProgress(`Loading ${id}`);
-        const loader = new GoogleStreetViewLoader();
+      // Pushes each vertex of the sphere out to the depth behind it.
+      function depthGeometry({ width, height, depthMap }) {
+        const geometry = new SphereGeometry(1, 512, 256).scale(-1, 1, 1);
+        const position = geometry.getAttribute("position");
+        const uv = geometry.getAttribute("uv");
+        for (let i = 0; i < position.count; i++) {
+          const x = Math.min(width - 1, Math.floor(uv.getX(i) * width));
+          const y = Math.min(height - 1, Math.floor((1 - uv.getY(i)) * height));
+          const d = depthMap[y * width + x];
+          const r = Number.isFinite(d) ? Math.min(d, SKY) : SKY;
+          position.setXYZ(i, position.getX(i) * r, position.getY(i) * r, position.getZ(i) * r);
+        }
+        return geometry;
+      }
 
-        loader.onProgress((p) => {
-          showProgress("Loaded " + p.toFixed(0) + "%");
+      // Shows the distance under the pointer.
+      function addReadout(canvas, depth) {
+        const wrap = document.createElement("div");
+        wrap.style.position = "relative";
+        const label = document.createElement("span");
+        label.className = "readout";
+        label.hidden = true;
+        wrap.append(canvas, label);
+        canvas.addEventListener("pointermove", (e) => {
+          const rect = canvas.getBoundingClientRect();
+          const x = Math.floor(((e.clientX - rect.left) / rect.width) * depth.width);
+          const y = Math.floor(((e.clientY - rect.top) / rect.height) * depth.height);
+          const d = depth.depthMap[y * depth.width + x];
+          label.textContent = Number.isFinite(d) ? `${d.toFixed(1)} m` : "sky";
+          label.style.left = `${e.clientX - rect.left}px`;
+          label.style.top = `${e.clientY - rect.top}px`;
+          label.hidden = false;
         });
-
-        try {
-          const depthLoader = new GoogleStreetViewDepthLoader();
-          drawDepthMap(await depthLoader.load(id));
-
-          await loader.load(id, 3);
-
-          showProgress("Finished.");
-          showError("");
-          canvasContainer.append(loader.canvas);
-          showMessage(
-            "Panorama loaded, street view data " +
-              loader.metadata.copyright +
-              ".<br/>"
-          );
-        } catch (e) {
-          showError(
-            e.code === "ZERO_RESULTS"
-              ? "No results"
-              : e.code === "NO_IMAGE"
-              ? "Could not load image."
-              : e.message
-          );
-        }
+        canvas.addEventListener("pointerleave", () => (label.hidden = true));
+        return wrap;
       }
 
-      PanoIdForm.addEventListener("submit", function (e) {
-        load(PanoIdInput.value);
-        e.preventDefault();
+      const loader = new GoogleStreetViewLoader();
+      const depthLoader = new GoogleStreetViewDepthLoader();
+
+      let showDepth = false;
+      let photo = null;
+      let colors = null;
+
+      const demo = createDemo({
+        label: "Panorama id",
+        placeholder: "A Street View panorama id",
+        examples: PANORAMAS,
+        async load(id, { zoom, progress, status, signal }) {
+          status("Loading the depth map…");
+          // Some panoramas have no depth map; show those as a plain sphere.
+          let depth = null;
+          try {
+            depth = await depthLoader.load(id);
+          } catch (e) {
+            if (e.code !== "BAD_METADATA") throw e;
+          }
+          if (signal.aborted) return {};
+          loader.onProgress(progress);
+          await loader.load(id, zoom);
+          const depthCanvas = depth && drawDepthMap(depth);
+          return {
+            canvas: loader.canvas,
+            credit: `Street View data ${loader.metadata.copyright}`,
+            name: id,
+            note: depth ? "" : "This panorama has no depth map.",
+            flat: depth ? [loader.canvas, addReadout(depthCanvas, depth)] : [loader.canvas],
+            onShow(viewer) {
+              const old = viewer.mesh.geometry;
+              viewer.mesh.geometry = depth
+                ? depthGeometry(depth)
+                : new SphereGeometry(500, 120, 60).scale(-1, 1, 1);
+              old.dispose();
+              if (photo && photo !== viewer.material.map) photo.dispose();
+              photo = viewer.material.map;
+              if (colors) colors.dispose();
+              colors = depth ? new CanvasTexture(depthCanvas) : null;
+              if (colors) colors.colorSpace = SRGBColorSpace;
+              toggle.disabled = !depth;
+              setDepthColors(showDepth);
+            },
+          };
+        },
       });
+
+      function setDepthColors(on) {
+        showDepth = on;
+        toggle.setAttribute("aria-pressed", String(on));
+        if (!photo) return;
+        demo.viewer.material.map = on && colors ? colors : photo;
+        demo.viewer.material.needsUpdate = true;
+      }
+
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.textContent = "Depth colours";
+      toggle.addEventListener("click", () => setDepthColors(!showDepth));
+      demo.extra.append(toggle);
+
+      // A slow sway of half a metre or so, enough to show the scene has depth.
+      const start = performance.now();
+      demo.viewer.onFrame = () => {
+        const t = (performance.now() - start) / 1000;
+        demo.viewer.camera.position.set(Math.sin(t * 0.5) * 0.6, Math.sin(t * 0.3) * 0.15, Math.cos(t * 0.4) * 0.6);
+      };
     </script>
   </body>
 </html>
